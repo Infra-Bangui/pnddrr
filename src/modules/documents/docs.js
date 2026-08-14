@@ -31,7 +31,7 @@ function printFiche(id){
     c.desarmement.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${esc(a.mun)||"—"}</td></tr>`).join("")}</table>${(c.desarmement.munitions||[]).length?`<p style="margin-top:4px"><b>Munitions et explosifs :</b> ${c.desarmement.munitions.map(m=>`${fmtN(m.qte)} ${esc(m.unite)}${m.nature?" ("+esc(m.nature)+")":""}`).join(" ; ")}</p>`:""}` : "";
   let reint="";
   if(c.reintMil) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration militaire</h3>
-    <table class="dt"><tr><th>Corps</th><td>${esc(c.reintMil.corps)}</td><th>Matricule</th><td>${esc(c.reintMil.matricule)}</td></tr>
+    <table class="dt"><tr><th>Corps</th><td>${esc(c.reintMil.corps)}</td><th>Matricule</th><td>${esc(c.reintMil.matricule)||"—"}</td></tr>
     <tr><th>Unité</th><td>${esc(c.reintMil.unite)||"—"}</td><th>Incorporation</th><td>${fmtD(c.reintMil.date)}</td></tr></table>`;
   if(c.reintSocio) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration socio-économique</h3>
     <table class="dt"><tr><th>Filière</th><td>${esc(c.reintSocio.filiere)}</td><th>Centre</th><td>${esc(c.reintSocio.centre)||"—"}</td></tr>

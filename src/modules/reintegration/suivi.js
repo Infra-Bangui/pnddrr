@@ -89,7 +89,7 @@ function rReint(){
       grpVagues(liste).map(([v,L])=>vgRow(v,L.length,8)+L.map(c=>{
         const mil=c.statut==="reintegration_militaire";
         const r=reintOf(c);
-        const det=mil?`${esc(c.reintMil.corps)} — matricule ${esc(c.reintMil.matricule)}`:`Filière ${esc(c.reintSocio.filiere)}${c.reintSocio.centre?" · "+esc(c.reintSocio.centre):""}`;
+        const det=mil?`${esc(c.reintMil.corps)}${c.reintMil.matricule?" — matricule "+esc(c.reintMil.matricule):""}`:`Filière ${esc(c.reintSocio.filiere)}${c.reintSocio.centre?" · "+esc(c.reintSocio.centre):""}`;
         const [bF,bV]=jalonBadge(c);
         const P=hasPerm("orienter");
         return `<tr><td><b>${c.num}</b></td><td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>

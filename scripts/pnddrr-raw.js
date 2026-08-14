@@ -896,7 +896,7 @@ function stepInfo(id, step){
     if(!r) corps=`<p class="muted">Aucune orientation prononcée pour l'instant. L'ex-combattant sera orienté vers la voie militaire (incorporation dans les forces) ou socio-économique (formation professionnelle et appui à l'installation).</p>`;
     else{
       const rows=[L("Voie",c.reintMil?"Militaire":"Socio-économique"),L("Orientation prononcée le",fmtD(r.date))];
-      if(c.reintMil){ rows.push(L("Corps / unité",esc(c.reintMil.corps)+(c.reintMil.unite?" · "+esc(c.reintMil.unite):"")),L("Matricule",esc(c.reintMil.matricule)),L("Formation initiale",esc(c.reintMil.formation)||"—")); }
+      if(c.reintMil){ rows.push(L("Corps / unité",esc(c.reintMil.corps)+(c.reintMil.unite?" · "+esc(c.reintMil.unite):"")),L("Matricule",esc(c.reintMil.matricule)||"—"),L("Formation initiale",esc(c.reintMil.formation)||"—")); }
       else{ rows.push(L("Filière",esc(c.reintSocio.filiere)+(c.reintSocio.centre?" · "+esc(c.reintSocio.centre):"")),L("Kit / appui",(c.reintSocio.kit?"Kit remis":"Kit non remis")+(c.reintSocio.appui?" · "+fmtN(c.reintSocio.appui)+" FCFA":"")),L("Visites de suivi",String((c.reintSocio.visites||[]).length))); }
       if(r.promo) rows.push(L("Promotion / vague",`<span class="tag">${esc(r.promo)}</span>`));
       const [bF,bV]=jalonBadge(c);
@@ -925,7 +925,7 @@ function parcoursEvents(c){
     add(d.date,"Désarmement — remise du matériel",`${d.armes.length} arme(s)${nm?` et ${nm} lot(s) de munitions`:""} réceptionnée(s) à ${d.lieu}${d.armes.length?" : "+d.armes.map(a=>a.type+(a.serie?" ("+a.serie+")":"")).join(", "):""}`,"desarme");
   }
   if(c.demobilisation) add(c.demobilisation.date,"Démobilisation prononcée",`Carte ${c.demobilisation.carte} délivrée à ${c.demobilisation.lieu}`,"demobilise");
-  if(c.reintMil) add(c.reintMil.date,"Orientation — réintégration militaire",`${c.reintMil.corps}${c.reintMil.unite?" · "+c.reintMil.unite:""} · matricule ${c.reintMil.matricule}${c.reintMil.promo?" · promotion "+c.reintMil.promo:""}${c.reintMil.formation?" · "+c.reintMil.formation:""}`,"reintegration_militaire");
+  if(c.reintMil) add(c.reintMil.date,"Orientation — réintégration militaire",`${c.reintMil.corps}${c.reintMil.unite?" · "+c.reintMil.unite:""}${c.reintMil.matricule?" · matricule "+c.reintMil.matricule:""}${c.reintMil.promo?" · promotion "+c.reintMil.promo:""}${c.reintMil.formation?" · "+c.reintMil.formation:""}`,"reintegration_militaire");
   if(c.reintSocio){
     add(c.reintSocio.date,"Orientation — réintégration socio-économique",`Filière ${c.reintSocio.filiere}${c.reintSocio.centre?" · "+c.reintSocio.centre:""}${c.reintSocio.duree?" · "+c.reintSocio.duree:""}${c.reintSocio.promo?" · promotion "+c.reintSocio.promo:""}`,"reintegration_socio");
     if(c.reintSocio.kit) add(c.reintSocio.kitDate||c.reintSocio.date,"Kit de réinstallation remis","","reintegration_socio");
@@ -1004,7 +1004,7 @@ function rFiche(id){
     h+=`<b style="color:#5A2E96">Réintégration militaire</b><table style="background:transparent;margin-top:6px">
       <tr><td style="width:240px;color:var(--muted);font-weight:600">Corps d'incorporation</td><td>${esc(r.corps)}</td></tr>
       <tr><td style="color:var(--muted);font-weight:600">Unité d'affectation</td><td>${esc(r.unite)||"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Matricule</td><td><span class="tag">${esc(r.matricule)}</span></td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Matricule</td><td>${r.matricule?`<span class="tag">${esc(r.matricule)}</span>`:"—"}</td></tr>
       <tr><td style="color:var(--muted);font-weight:600">Date d'incorporation</td><td>${fmtD(r.date)}</td></tr>
       <tr><td style="color:var(--muted);font-weight:600">Formation initiale</td><td>${esc(r.formation)||"—"}</td></tr></table>
     ${jalonsFiche(c)}`;
@@ -1145,7 +1145,7 @@ function mReintMil(id){
     <div class="grid2">
     <div class="field"><label>Corps d'incorporation</label><select id="rm_corps">${CORPS.map(x=>`<option>${x}</option>`).join("")}</select></div>
     <div class="field"><label>Unité d'affectation</label><input id="rm_unite"></div>
-    <div class="field"><label>Matricule attribué</label><input id="rm_mat" required></div>
+    <div class="field"><label>Matricule attribué <span class="muted" style="font-weight:400">(optionnel)</span></label><input id="rm_mat" placeholder="Laissé vide en formation"></div>
     <div class="field"><label>Date d'incorporation</label><input type="date" id="rm_date" value="${today()}"></div>
     <div class="field"><label>Formation initiale prévue</label><input id="rm_form" placeholder="Ex. : formation commune de base — camp Kassaï"></div>
     <div class="field"><label>Promotion / vague de formation</label><input id="rm_promo" list="promoList" value="${esc((DB.combattants.find(x=>x.id===id)||{}).vague||"")}" placeholder="Ex. : Vague 2026-A"><datalist id="promoList">${promosConnues().map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div></div>`,
@@ -1153,10 +1153,9 @@ function mReintMil(id){
 }
 function saveReintMil(id){
   const c=DB.combattants.find(x=>x.id===id);
-  if(!$("rm_mat").value.trim()){ toast("Le matricule est obligatoire."); return; }
   c.reintMil={corps:$("rm_corps").value, unite:$("rm_unite").value.trim(), matricule:$("rm_mat").value.trim(), date:$("rm_date").value||today(), formation:$("rm_form").value.trim(), promo:$("rm_promo").value.trim()||c.vague||""};
   c.statut="reintegration_militaire";
-  log("Réintégration militaire",`${c.num} — ${c.reintMil.corps}, matricule ${c.reintMil.matricule}`);
+  log("Réintégration militaire",`${c.num} — ${c.reintMil.corps}${c.reintMil.matricule?", matricule "+c.reintMil.matricule:""}`);
   closeModal(); toast("Orientation militaire enregistrée."); rFiche(id);
 }
 function mReintSocio(id){
@@ -1265,15 +1264,17 @@ function mIntegration(id){
     <div class="grid2">
       <div class="field"><label>Date d'intégration effective</label><input type="date" id="vi_date" value="${today()}"></div>
       <div class="field"><label>${mil?"Unité rejointe / affectation":"Activité exercée / installation"}</label><input id="vi_det" value="${mil?esc(c.reintMil.unite||""):esc(c.reintSocio.filiere||"")}"></div>
+      ${mil?`<div class="field"><label>Matricule attribué</label><input id="vi_mat" value="${esc(c.reintMil.matricule||"")}" placeholder="Saisi à l'intégration, pas en formation"></div>`:""}
     </div>
-    <p class="small muted">${mil?"Confirme que l'intéressé a effectivement rejoint son unité et sert au sein des forces.":"Confirme que l'intéressé exerce effectivement son activité et est installé dans la vie civile."}</p>`,
+    <p class="small muted">${mil?"Confirme que l'intéressé a effectivement rejoint son unité et sert au sein des forces. Le matricule peut être renseigné ici s'il n'avait pas été attribué en formation.":"Confirme que l'intéressé exerce effectivement son activité et est installé dans la vie civile."}</p>`,
     `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveIntegration('${id}')">Confirmer l'intégration</button>`);
 }
 function saveIntegration(id){
   const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c); const mil=!!c.reintMil;
   r.vieDate=$("vi_date").value||today();
   r.vieDetail=$("vi_det").value.trim();
-  log("Intégration "+(mil?"vie militaire":"vie civile"),`${c.num}${r.vieDetail?" — "+r.vieDetail:""}`);
+  if(mil && $("vi_mat")) c.reintMil.matricule=$("vi_mat").value.trim();
+  log("Intégration "+(mil?"vie militaire":"vie civile"),`${c.num}${r.vieDetail?" — "+r.vieDetail:""}${mil&&c.reintMil.matricule?" · matricule "+c.reintMil.matricule:""}`);
   closeModal(); toast("Intégration confirmée.");
   VIEW==="reintegration"?rReint():VIEW==="jalons"?rJalons():rFiche(id);
 }
@@ -1932,7 +1933,7 @@ function printFiche(id){
     c.desarmement.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${esc(a.mun)||"—"}</td></tr>`).join("")}</table>${(c.desarmement.munitions||[]).length?`<p style="margin-top:4px"><b>Munitions et explosifs :</b> ${c.desarmement.munitions.map(m=>`${fmtN(m.qte)} ${esc(m.unite)}${m.nature?" ("+esc(m.nature)+")":""}`).join(" ; ")}</p>`:""}` : "";
   let reint="";
   if(c.reintMil) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration militaire</h3>
-    <table class="dt"><tr><th>Corps</th><td>${esc(c.reintMil.corps)}</td><th>Matricule</th><td>${esc(c.reintMil.matricule)}</td></tr>
+    <table class="dt"><tr><th>Corps</th><td>${esc(c.reintMil.corps)}</td><th>Matricule</th><td>${esc(c.reintMil.matricule)||"—"}</td></tr>
     <tr><th>Unité</th><td>${esc(c.reintMil.unite)||"—"}</td><th>Incorporation</th><td>${fmtD(c.reintMil.date)}</td></tr></table>`;
   if(c.reintSocio) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration socio-économique</h3>
     <table class="dt"><tr><th>Filière</th><td>${esc(c.reintSocio.filiere)}</td><th>Centre</th><td>${esc(c.reintSocio.centre)||"—"}</td></tr>
@@ -2278,7 +2279,7 @@ function rReint(){
       grpVagues(liste).map(([v,L])=>vgRow(v,L.length,8)+L.map(c=>{
         const mil=c.statut==="reintegration_militaire";
         const r=reintOf(c);
-        const det=mil?`${esc(c.reintMil.corps)} — matricule ${esc(c.reintMil.matricule)}`:`Filière ${esc(c.reintSocio.filiere)}${c.reintSocio.centre?" · "+esc(c.reintSocio.centre):""}`;
+        const det=mil?`${esc(c.reintMil.corps)}${c.reintMil.matricule?" — matricule "+esc(c.reintMil.matricule):""}`:`Filière ${esc(c.reintSocio.filiere)}${c.reintSocio.centre?" · "+esc(c.reintSocio.centre):""}`;
         const [bF,bV]=jalonBadge(c);
         const P=hasPerm("orienter");
         return `<tr><td><b>${c.num}</b></td><td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
