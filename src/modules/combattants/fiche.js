@@ -65,7 +65,6 @@ function stepInfo(id, step){
   }
   openModal(`${titre} — dossier ${c.num}`, `<div style="margin-bottom:10px">${etat}</div>${corps}`, pied);
 }
-function can(role){ return CUR && (CUR.role==="admin"||CUR.role===role); }
 function parcoursEvents(c){
   const ev=[];
   const add=(date,titre,detail,cls)=>{ if(date) ev.push({date:String(date).slice(0,10),titre,detail,cls}); };

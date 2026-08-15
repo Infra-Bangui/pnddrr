@@ -1,35 +1,35 @@
 # PNDDRR — Suivi DDR (République Centrafricaine)
 
-Application Next.js du **Programme national de désarmement, démobilisation, réintégration et rapatriement** (UEPNDDR / PNDDRR).
+Application du **Programme national de désarmement, démobilisation, réintégration et rapatriement** (UEPNDDR / PNDDRR).
 
-## Architecture modulaire
+Le métier tourne en JavaScript classique (hors ligne, `localStorage`). Next.js sert de véhicule de déploiement.
+
+## Où écrire le code
+
+Une fonction = un dossier. **`src/modules/` est la source.** Le bundle navigateur est généré, on ne l’édite pas.
 
 ```
-src/
-  app/                 # Next.js App Router
-  components/          # Shell React (hôte du moteur)
-  styles/              # Design system PNDDRR
-  modules/
-    core/              # État, persistance, crypto, utilitaires
-    referentials/      # Géographie, statuts, listes métier
-    auth/              # Connexion, verrouillage, permissions
-    shell/             # Navigation, modales
-    dashboard/         # Tableau de bord & alertes
-    combattants/       # Enregistrement, registre, fiche
-    armes/             # Registre des armes & munitions
-    reintegration/     # Suivi + formation / jalons
-    cartographie/      # Zones de désarmement
-    documents/         # Cartes & attestations
-    admin/             # Comptes, journal, import, sauvegarde…
-    stats/             # Statistiques
-    demo/              # Jeu de données de simulation
+src/modules/
+  core/              # État, persistance, utilitaires
+  referentials/      # Géographie, statuts, listes métier
+  auth/              # Connexion, verrouillage, permissions
+  shell/             # Navigation, modales
+  dashboard/         # Tableau de bord
+  combattants/       # Enregistrement, registre, fiche
+  armes/             # Registre des armes
+  reintegration/     # Suivi + jalons de formation
+  cartographie/      # Carte des zones de désarmement
+  documents/         # Cartes & attestations
+  admin/             # Import, comptes, journal, paramètres, sauvegarde
+  stats/             # Statistiques
+  demo/              # Jeu de données de simulation
 ```
-
-Les modules métier sont découpés sous `src/modules/`. Le bundle navigateur est généré dans `public/engine/pnddrr.bundle.js` via :
 
 ```bash
 npm run engine:build
 ```
+
+Produit `public/engine/pnddrr.bundle.js`. Le `prebuild` Next.js le lance tout seul.
 
 ## Démarrage local
 
