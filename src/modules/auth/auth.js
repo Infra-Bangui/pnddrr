@@ -13,7 +13,7 @@ function doLogin(){
     })
     .then(db=>{
       if(!db) return;
-      if(db.combattants&&db.users){ DB=db; migrateDB(); if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} } }
+      applyServerDb(db);
       const u=DB.users.find(x=>x.login===login&&x.actif);
       if(!u){ $("loginErr").textContent="Identifiant ou mot de passe incorrect."; $("loginErr").style.display="block"; return; }
       enterSession(u);
@@ -26,13 +26,29 @@ function doLogin(){
       enterSession(u);
     });
 }
-function enterSession(u){
+function applyServerDb(db){
+  if(!(db&&db.combattants&&db.users)) return false;
+  DB=db; migrateDB();
+  if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
+  return true;
+}
+function enterSession(u, opts){
   CUR=u; $("loginErr").style.display="none";
   $("loginScreen").style.display="none"; $("app").classList.add("on");
   $("uName").textContent=u.nom; $("uRole").textContent=ROLES[u.role];
   $("todayLbl").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  log("Connexion",`Ouverture de session (${ROLES[u.role]})`);
+  if(!(opts&&opts.resume)) log("Connexion",`Ouverture de session (${ROLES[u.role]})`);
   buildNav(); updNetBadge(); go("dashboard");
+}
+function resumeSession(user){
+  fetch("/api/db",{credentials:"include"})
+    .then(x=>{ if(!x.ok) throw new Error("db"); return x.json(); })
+    .then(db=>{
+      applyServerDb(db);
+      const u=DB.users.find(x=>x.login===user.login&&x.actif);
+      if(u) enterSession(u,{resume:true});
+    })
+    .catch(()=>{});
 }
 ["loginUser","loginPass"].forEach(id=>$(id).addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); doLogin(); } }));
 $("loginForm").addEventListener("submit",e=>{ e.preventDefault(); doLogin(); });
@@ -81,5 +97,6 @@ fetch("/api/config",{credentials:"include"}).then(r=>r.json()).then(c=>{
   window.__PNDDRR_SERVER=!!c.server;
   window.__PNDDRR_DEMO=!!c.demo;
   const h=$("demoHint"); if(h&&c.demo) h.style.display="block";
+  if(c.user&&c.user.login) resumeSession(c.user);
 }).catch(()=>{ window.__PNDDRR_SERVER=false; });
 

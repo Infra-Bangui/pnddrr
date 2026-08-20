@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: "PNDDRR — Suivi DDR | République Centrafricaine",
   description:
     "Programme national de désarmement, démobilisation, réintégration et rapatriement (UEPNDDR)",
+  applicationName: "PNDDRR",
 };
 
 export default function RootLayout({
