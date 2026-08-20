@@ -13,6 +13,7 @@ export type PnddrrDb = {
     role: string;
     actif: boolean;
     perms?: string[];
+    passUpdated?: boolean;
   }>;
   combattants: unknown[];
   journal: unknown[];
@@ -105,6 +106,20 @@ async function atomicWrite(db: PnddrrDb): Promise<void> {
 export function saveDb(db: PnddrrDb): Promise<void> {
   writeChain = writeChain.then(() => atomicWrite(db), () => atomicWrite(db));
   return writeChain;
+}
+
+/** Keep existing password hashes unless the client marks an explicit change. */
+export async function saveClientDb(incoming: PnddrrDb): Promise<void> {
+  const current = await readDb();
+  const prevByLogin = new Map(current.users.map((u) => [u.login, u]));
+  const users = incoming.users.map((u) => {
+    const { passUpdated, ...rest } = u;
+    const prev = prevByLogin.get(rest.login);
+    if (!prev) return rest;
+    if (passUpdated && rest.pass) return rest;
+    return { ...rest, pass: prev.pass };
+  });
+  await saveDb({ ...incoming, users });
 }
 
 export function isDbShape(x: unknown): x is PnddrrDb {

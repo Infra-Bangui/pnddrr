@@ -59,7 +59,7 @@ function persist(){
 }
 var _saveT=null;
 function scheduleServerSave(){
-  if(!window.__PNDDRR_SERVER) return;
+  if(!window.__PNDDRR_SERVER || !window.__PNDDRR_SYNCED) return;
   clearTimeout(_saveT);
   _saveT=setTimeout(pushServer, 500);
 }

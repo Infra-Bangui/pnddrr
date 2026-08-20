@@ -29,6 +29,7 @@ function doLogin(){
 function applyServerDb(db){
   if(!(db&&db.combattants&&db.users)) return false;
   DB=db; migrateDB();
+  window.__PNDDRR_SYNCED=true;
   if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
   return true;
 }
@@ -65,7 +66,7 @@ function saveMonPass(){
   const nv=$("mp_new").value;
   if(nv.length<6){ toast("Le nouveau mot de passe doit compter au moins 6 caractères."); return; }
   if(nv!==$("mp_new2").value){ toast("La confirmation ne correspond pas."); return; }
-  CUR.pass=hashPwd(nv); log("Mot de passe","Changement du mot de passe personnel");
+  CUR.pass=hashPwd(nv); CUR.passUpdated=true; log("Mot de passe","Changement du mot de passe personnel");
   closeModal(); toast("Mot de passe changé.");
 }
 /* Verrouillage automatique après 15 minutes d'inactivité */

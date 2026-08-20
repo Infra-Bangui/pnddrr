@@ -116,7 +116,7 @@ function persist(){
 }
 var _saveT=null;
 function scheduleServerSave(){
-  if(!window.__PNDDRR_SERVER) return;
+  if(!window.__PNDDRR_SERVER || !window.__PNDDRR_SYNCED) return;
   clearTimeout(_saveT);
   _saveT=setTimeout(pushServer, 500);
 }
@@ -265,6 +265,7 @@ function doLogin(){
 function applyServerDb(db){
   if(!(db&&db.combattants&&db.users)) return false;
   DB=db; migrateDB();
+  window.__PNDDRR_SYNCED=true;
   if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
   return true;
 }
@@ -301,7 +302,7 @@ function saveMonPass(){
   const nv=$("mp_new").value;
   if(nv.length<6){ toast("Le nouveau mot de passe doit compter au moins 6 caractères."); return; }
   if(nv!==$("mp_new2").value){ toast("La confirmation ne correspond pas."); return; }
-  CUR.pass=hashPwd(nv); log("Mot de passe","Changement du mot de passe personnel");
+  CUR.pass=hashPwd(nv); CUR.passUpdated=true; log("Mot de passe","Changement du mot de passe personnel");
   closeModal(); toast("Mot de passe changé.");
 }
 /* Verrouillage automatique après 15 minutes d'inactivité */
@@ -1581,13 +1582,13 @@ function saveCompte(id){
     const u=DB.users.find(x=>x.id===id);
     u.nom=$("c_nom").value.trim()||u.nom; u.role=role; u.perms=perms||undefined;
     if(role==="admin") delete u.perms;
-    if($("c_pass").value) u.pass=hashPwd($("c_pass").value);
+    if($("c_pass").value){ u.pass=hashPwd($("c_pass").value); u.passUpdated=true; }
     log("Compte modifié",`${u.login} — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);
   } else {
     const login=$("c_login").value.trim();
     if(!login||!$("c_pass").value){ toast("Identifiant et mot de passe requis."); return; }
     if(DB.users.some(x=>x.login===login)){ toast("Cet identifiant existe déjà."); return; }
-    const nu={id:"u"+Date.now(),login,pass:hashPwd($("c_pass").value),nom:$("c_nom").value.trim()||login,role,actif:true};
+    const nu={id:"u"+Date.now(),login,pass:hashPwd($("c_pass").value),nom:$("c_nom").value.trim()||login,role,actif:true,passUpdated:true};
     if(role!=="admin") nu.perms=perms;
     DB.users.push(nu);
     log("Compte créé",`${login} (${ROLES[role]}) — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);
@@ -1993,6 +1994,7 @@ function restoreJSON(inp){
       const d=JSON.parse(r.result);
       if(!d.combattants||!d.users) throw 0;
       DB=d; migrateDB();
+      (DB.users||[]).forEach(u=>{ u.passUpdated=true; });
       addSync("Restauration", f.name, `poste source : ${d.poste||"(non précisé)"} — ${DB.combattants.length} dossier(s)`);
       log("Restauration",`Fichier ${f.name} — ${DB.combattants.length} dossier(s)`);
       toast("Sauvegarde restaurée."); go("dashboard");

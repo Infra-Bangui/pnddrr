@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/server/auth";
-import { isDbShape, readDb, saveDb } from "@/server/store";
+import { isDbShape, readDb, saveClientDb } from "@/server/store";
 
 export const runtime = "nodejs";
 
@@ -31,6 +31,6 @@ export async function PUT(req: Request) {
   if (body.users.length < 1) {
     return NextResponse.json({ error: "Au moins un compte utilisateur est requis" }, { status: 400 });
   }
-  await saveDb(body);
+  await saveClientDb(body);
   return NextResponse.json({ ok: true });
 }

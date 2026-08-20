@@ -129,5 +129,6 @@ declare global {
     __PNDDRR_READY?: boolean;
     __PNDDRR_SERVER?: boolean;
     __PNDDRR_DEMO?: boolean;
+    __PNDDRR_SYNCED?: boolean;
   }
 }

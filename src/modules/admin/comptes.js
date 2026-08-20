@@ -45,13 +45,13 @@ function saveCompte(id){
     const u=DB.users.find(x=>x.id===id);
     u.nom=$("c_nom").value.trim()||u.nom; u.role=role; u.perms=perms||undefined;
     if(role==="admin") delete u.perms;
-    if($("c_pass").value) u.pass=hashPwd($("c_pass").value);
+    if($("c_pass").value){ u.pass=hashPwd($("c_pass").value); u.passUpdated=true; }
     log("Compte modifié",`${u.login} — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);
   } else {
     const login=$("c_login").value.trim();
     if(!login||!$("c_pass").value){ toast("Identifiant et mot de passe requis."); return; }
     if(DB.users.some(x=>x.login===login)){ toast("Cet identifiant existe déjà."); return; }
-    const nu={id:"u"+Date.now(),login,pass:hashPwd($("c_pass").value),nom:$("c_nom").value.trim()||login,role,actif:true};
+    const nu={id:"u"+Date.now(),login,pass:hashPwd($("c_pass").value),nom:$("c_nom").value.trim()||login,role,actif:true,passUpdated:true};
     if(role!=="admin") nu.perms=perms;
     DB.users.push(nu);
     log("Compte créé",`${login} (${ROLES[role]}) — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);

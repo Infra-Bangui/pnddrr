@@ -236,6 +236,7 @@ function restoreJSON(inp){
       const d=JSON.parse(r.result);
       if(!d.combattants||!d.users) throw 0;
       DB=d; migrateDB();
+      (DB.users||[]).forEach(u=>{ u.passUpdated=true; });
       addSync("Restauration", f.name, `poste source : ${d.poste||"(non précisé)"} — ${DB.combattants.length} dossier(s)`);
       log("Restauration",`Fichier ${f.name} — ${DB.combattants.length} dossier(s)`);
       toast("Sauvegarde restaurée."); go("dashboard");
