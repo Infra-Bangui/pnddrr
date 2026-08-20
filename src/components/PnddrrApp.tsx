@@ -96,12 +96,13 @@ export function PnddrrApp() {
     document.addEventListener("pnddrr-ready", onReady);
 
     if (window.__PNDDRR_READY) {
+      document.dispatchEvent(new Event("pnddrr-bind"));
       setStatus("ready");
       return () => document.removeEventListener("pnddrr-ready", onReady);
     }
 
     const script = document.createElement("script");
-    script.src = "/engine/pnddrr.bundle.js";
+    script.src = "/engine/pnddrr.bundle.js?v=session-3";
     script.dataset.pnddrrEngine = "1";
     script.onerror = () => setStatus("error");
     document.body.appendChild(script);

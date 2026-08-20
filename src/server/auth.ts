@@ -60,9 +60,34 @@ export function readToken(token: string | undefined): Session | null {
   }
 }
 
-export async function getSession(): Promise<Session | null> {
-  const jar = await cookies();
-  return readToken(jar.get(COOKIE)?.value);
+export async function getSession(req?: Request): Promise<Session | null> {
+  if (req) {
+    const fromHeader = readToken(cookieFromHeader(req.headers.get("cookie")));
+    if (fromHeader) return fromHeader;
+  }
+  try {
+    const jar = await cookies();
+    return readToken(jar.get(COOKIE)?.value);
+  } catch {
+    return null;
+  }
+}
+
+function cookieFromHeader(header: string | null): string | undefined {
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq < 1) continue;
+    if (trimmed.slice(0, eq) === COOKIE) {
+      try {
+        return decodeURIComponent(trimmed.slice(eq + 1));
+      } catch {
+        return trimmed.slice(eq + 1);
+      }
+    }
+  }
+  return undefined;
 }
 
 export function sessionCookieOptions() {
@@ -72,6 +97,7 @@ export function sessionCookieOptions() {
     path: "/",
     maxAge: MAX_AGE,
     secure: process.env.PNDDRR_SECURE_COOKIE === "1",
+    expires: new Date(Date.now() + MAX_AGE * 1000),
   };
 }
 

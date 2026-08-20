@@ -19,6 +19,10 @@ const nextConfig: NextConfig = {
           { key: "X-DNS-Prefetch-Control", value: "off" },
         ],
       },
+      {
+        source: "/engine/:path*",
+        headers: [{ key: "Cache-Control", value: "private, no-cache" }],
+      },
     ];
   },
 };

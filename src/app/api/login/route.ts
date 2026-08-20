@@ -3,6 +3,7 @@ import { COOKIE, makeToken, pwdOk, sessionCookieOptions } from "@/server/auth";
 import { readDb } from "@/server/store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const hits = new Map<string, { n: number; t: number }>();
 

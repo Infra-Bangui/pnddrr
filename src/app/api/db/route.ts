@@ -3,13 +3,14 @@ import { getSession } from "@/server/auth";
 import { isDbShape, readDb, saveClientDb } from "@/server/store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const s = await getSession();
+export async function GET(req: Request) {
+  const s = await getSession(req);
   if (!s) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   try {
     const db = await readDb();
-    return NextResponse.json(db);
+    return NextResponse.json(db, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erreur serveur";
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -17,7 +18,7 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const s = await getSession();
+  const s = await getSession(req);
   if (!s) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   let body: unknown;
   try {

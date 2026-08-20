@@ -94,10 +94,16 @@ function logout(){
   fetch("/api/logout",{method:"POST",credentials:"include"}).catch(()=>{});
   log("Déconnexion","Fermeture de session"); CUR=null; $("app").classList.remove("on"); $("loginScreen").style.display="flex"; $("loginForm").reset();
 }
-fetch("/api/config",{credentials:"include"}).then(r=>r.json()).then(c=>{
-  window.__PNDDRR_SERVER=!!c.server;
-  window.__PNDDRR_DEMO=!!c.demo;
-  const h=$("demoHint"); if(h&&c.demo) h.style.display="block";
-  if(c.user&&c.user.login) resumeSession(c.user);
-}).catch(()=>{ window.__PNDDRR_SERVER=false; });
+function bootSession(){
+  if($("embLogin")&&typeof ARM_SVG!=="undefined") $("embLogin").innerHTML=ARM_SVG;
+  if($("embSide")&&typeof ARM_SVG!=="undefined") $("embSide").innerHTML=ARM_SVG;
+  fetch("/api/config",{credentials:"include"}).then(r=>r.json()).then(c=>{
+    window.__PNDDRR_SERVER=!!c.server;
+    window.__PNDDRR_DEMO=!!c.demo;
+    const h=$("demoHint"); if(h&&c.demo) h.style.display="block";
+    if(c.user&&c.user.login) resumeSession(c.user);
+  }).catch(()=>{ window.__PNDDRR_SERVER=false; });
+}
+bootSession();
+document.addEventListener("pnddrr-bind", bootSession);
 
