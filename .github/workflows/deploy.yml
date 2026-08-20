@@ -1,0 +1,45 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Connexion à ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build et push de l'image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/infra-bangui/pnddrr:latest
+
+  deploy:
+    needs: build
+    runs-on: [self-hosted, bangui]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Déployer sur pnddrr
+        run: |
+          scp -o StrictHostKeyChecking=no \
+            -i /opt/github-runner/.ssh/deploy_key \
+            docker-compose.yml manu@192.168.10.181:/opt/app/docker-compose.yml
+          ssh -o StrictHostKeyChecking=no \
+            -i /opt/github-runner/.ssh/deploy_key \
+            manu@192.168.10.181 \
+            "cd /opt/app && \
+             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin && \
+             docker compose pull && docker compose up -d"

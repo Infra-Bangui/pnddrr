@@ -84,7 +84,7 @@ function seedDemo(n, silent){
 /* Premier démarrage : pré-charger la simulation (60 ex-combattants fictifs) pour découvrir le programme.
    L'effacement des données locales laisse ensuite l'appareil vierge (marqueur pnddrr_skip_demo). */
 try{
-  if(DB.combattants.length===0 && !(HAS_LS&&localStorage.getItem("pnddrr_skip_demo"))){
+  if(window.__PNDDRR_DEMO && DB.combattants.length===0 && !(HAS_LS&&localStorage.getItem("pnddrr_skip_demo"))){
     seedDemo(60,true); DEMO_PRELOADED=true;
   }
 }catch(e){}

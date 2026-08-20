@@ -44,7 +44,7 @@ const SHELL_HTML = `
       <div class="field"><label>Mot de passe</label><input id="loginPass" type="password" required></div>
       <button class="btn" style="width:100%;margin-top:6px" type="button" id="loginBtn" onclick="doLogin()">Se connecter</button>
       <div class="err" id="loginErr">Identifiant ou mot de passe incorrect.</div>
-      <div class="demo-hint">
+      <div class="demo-hint" id="demoHint" style="display:none">
         <b>Comptes de démonstration :</b><br>
         admin / admin2026 — Administrateur<br>
         agent / agent2026 — Agent DDR (opérations)<br>
@@ -127,5 +127,7 @@ export function PnddrrApp() {
 declare global {
   interface Window {
     __PNDDRR_READY?: boolean;
+    __PNDDRR_SERVER?: boolean;
+    __PNDDRR_DEMO?: boolean;
   }
 }

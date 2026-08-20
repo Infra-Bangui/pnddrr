@@ -52,8 +52,21 @@ const LS_KEY="pnddrr_db", LS_TS="pnddrr_ts";
 function storageOK(){ try{ localStorage.setItem("__t","1"); localStorage.removeItem("__t"); return true; }catch(e){ return false; } }
 var HAS_LS = storageOK();
 function persist(){
-  if(!HAS_LS) return;
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); updNetBadge(); }catch(e){}
+  if(HAS_LS){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); updNetBadge(); }catch(e){}
+  }
+  scheduleServerSave();
+}
+var _saveT=null;
+function scheduleServerSave(){
+  if(!window.__PNDDRR_SERVER) return;
+  clearTimeout(_saveT);
+  _saveT=setTimeout(pushServer, 500);
+}
+function pushServer(){
+  fetch("/api/db",{method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)})
+    .then(r=>{ if(r.status===401) toast("Session expirée — reconnectez-vous."); })
+    .catch(()=>{});
 }
 function lastPersist(){ try{ return localStorage.getItem(LS_TS); }catch(e){ return null; } }
 /* SHA-256 pure JS (synchrone, hors ligne) — implémentation standard FIPS 180-4 */
@@ -79,7 +92,7 @@ function sha256(ascii){
   return H.map(x=>(x>>>0).toString(16).padStart(8,"0")).join("");
 }
 function hashPwd(p){ return "sha256:"+sha256("PNDDRR|"+p); }
-function pwdOK(u, saisie){ return u.pass && u.pass.startsWith("sha256:") ? u.pass===hashPwd(saisie) : u.pass===saisie; }
+function pwdOK(u, saisie){ return !!(u.pass && u.pass.startsWith("sha256:") && u.pass===hashPwd(saisie)); }
 function migrateDB(){
   if(!DB.journal) DB.journal=[];
   if(!DB.groupes||!DB.groupes.length) DB.groupes=DEFAULT_GROUPES.slice();

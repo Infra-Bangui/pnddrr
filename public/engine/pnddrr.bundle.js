@@ -109,8 +109,21 @@ const LS_KEY="pnddrr_db", LS_TS="pnddrr_ts";
 function storageOK(){ try{ localStorage.setItem("__t","1"); localStorage.removeItem("__t"); return true; }catch(e){ return false; } }
 var HAS_LS = storageOK();
 function persist(){
-  if(!HAS_LS) return;
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); updNetBadge(); }catch(e){}
+  if(HAS_LS){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); updNetBadge(); }catch(e){}
+  }
+  scheduleServerSave();
+}
+var _saveT=null;
+function scheduleServerSave(){
+  if(!window.__PNDDRR_SERVER) return;
+  clearTimeout(_saveT);
+  _saveT=setTimeout(pushServer, 500);
+}
+function pushServer(){
+  fetch("/api/db",{method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)})
+    .then(r=>{ if(r.status===401) toast("Session expirée — reconnectez-vous."); })
+    .catch(()=>{});
 }
 function lastPersist(){ try{ return localStorage.getItem(LS_TS); }catch(e){ return null; } }
 /* SHA-256 pure JS (synchrone, hors ligne) — implémentation standard FIPS 180-4 */
@@ -136,7 +149,7 @@ function sha256(ascii){
   return H.map(x=>(x>>>0).toString(16).padStart(8,"0")).join("");
 }
 function hashPwd(p){ return "sha256:"+sha256("PNDDRR|"+p); }
-function pwdOK(u, saisie){ return u.pass && u.pass.startsWith("sha256:") ? u.pass===hashPwd(saisie) : u.pass===saisie; }
+function pwdOK(u, saisie){ return !!(u.pass && u.pass.startsWith("sha256:") && u.pass===hashPwd(saisie)); }
 function migrateDB(){
   if(!DB.journal) DB.journal=[];
   if(!DB.groupes||!DB.groupes.length) DB.groupes=DEFAULT_GROUPES.slice();
@@ -224,13 +237,37 @@ function numDem(){ DB.seq.dem++; const p=posteCode(); return `DEM-${p?p+"-":""}$
 /* module: auth/auth.js — PNDDRR engine (classic globals) */
 /* ---------- Authentification ---------- */
 function doLogin(){
-  const u = DB.users.find(x=>x.login===$("loginUser").value.trim() && x.actif && pwdOK(x,$("loginPass").value));
-  if(!u){ $("loginErr").style.display="block"; return; }
-  CUR = u; $("loginErr").style.display="none";
+  const login=$("loginUser").value.trim(), pass=$("loginPass").value;
+  $("loginErr").style.display="none";
+  fetch("/api/login",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({login,password:pass})})
+    .then(r=>{
+      if(r.status===429){ $("loginErr").textContent="Trop de tentatives. Réessayez plus tard."; $("loginErr").style.display="block"; return null; }
+      if(r.status===401){ $("loginErr").textContent="Identifiant ou mot de passe incorrect."; $("loginErr").style.display="block"; return null; }
+      if(!r.ok) throw new Error("login");
+      window.__PNDDRR_SERVER=true;
+      return fetch("/api/db",{credentials:"include"}).then(x=>{ if(!x.ok) throw new Error("db"); return x.json(); });
+    })
+    .then(db=>{
+      if(!db) return;
+      if(db.combattants&&db.users){ DB=db; migrateDB(); if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} } }
+      const u=DB.users.find(x=>x.login===login&&x.actif);
+      if(!u){ $("loginErr").textContent="Identifiant ou mot de passe incorrect."; $("loginErr").style.display="block"; return; }
+      enterSession(u);
+    })
+    .catch(()=>{
+      /* Hors ligne / pas d'API : repli local uniquement si le serveur n'est pas en face */
+      if(window.__PNDDRR_SERVER){ $("loginErr").textContent="Impossible de charger le registre."; $("loginErr").style.display="block"; return; }
+      const u=DB.users.find(x=>x.login===login && x.actif && pwdOK(x,pass));
+      if(!u){ $("loginErr").textContent="Identifiant ou mot de passe incorrect."; $("loginErr").style.display="block"; return; }
+      enterSession(u);
+    });
+}
+function enterSession(u){
+  CUR=u; $("loginErr").style.display="none";
   $("loginScreen").style.display="none"; $("app").classList.add("on");
-  $("uName").textContent = u.nom; $("uRole").textContent = ROLES[u.role];
-  $("todayLbl").textContent = new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  log("Connexion", `Ouverture de session (${ROLES[u.role]})`);
+  $("uName").textContent=u.nom; $("uRole").textContent=ROLES[u.role];
+  $("todayLbl").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  log("Connexion",`Ouverture de session (${ROLES[u.role]})`);
   buildNav(); updNetBadge(); go("dashboard");
 }
 ["loginUser","loginPass"].forEach(id=>$(id).addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); doLogin(); } }));
@@ -272,7 +309,15 @@ function unlockSession(){
   LOCKED=false; LOCK_T=Date.now(); $("lockScreen").style.display="none";
   log("Session","Déverrouillage");
 }
-function logout(){ log("Déconnexion","Fermeture de session"); CUR=null; $("app").classList.remove("on"); $("loginScreen").style.display="flex"; $("loginForm").reset(); }
+function logout(){
+  fetch("/api/logout",{method:"POST",credentials:"include"}).catch(()=>{});
+  log("Déconnexion","Fermeture de session"); CUR=null; $("app").classList.remove("on"); $("loginScreen").style.display="flex"; $("loginForm").reset();
+}
+fetch("/api/config",{credentials:"include"}).then(r=>r.json()).then(c=>{
+  window.__PNDDRR_SERVER=!!c.server;
+  window.__PNDDRR_DEMO=!!c.demo;
+  const h=$("demoHint"); if(h&&c.demo) h.style.display="block";
+}).catch(()=>{ window.__PNDDRR_SERVER=false; });
 
 
 /* module: shell/nav.js — PNDDRR engine (classic globals) */
@@ -342,7 +387,7 @@ function go(v, arg){
 /* module: shell/modal.js — PNDDRR engine (classic globals) */
 /* ---------- Modale ---------- */
 function openModal(title, body, footer){
-  $("modalBox").innerHTML = `<div class="mh"><h3>${title}</h3><button onclick="closeModal()">×</button></div><div class="mb">${body}</div><div class="mf">${footer||'<button class="btn ghost" onclick="closeModal()">Fermer</button>'}</div>`;
+  $("modalBox").innerHTML = `<div class="mh"><h3>${esc(title)}</h3><button onclick="closeModal()">×</button></div><div class="mb">${body}</div><div class="mf">${footer||'<button class="btn ghost" onclick="closeModal()">Fermer</button>'}</div>`;
   $("modalBack").classList.add("on");
 }
 function closeModal(){ $("modalBack").classList.remove("on"); }
@@ -729,7 +774,7 @@ function seedDemo(n, silent){
 /* Premier démarrage : pré-charger la simulation (60 ex-combattants fictifs) pour découvrir le programme.
    L'effacement des données locales laisse ensuite l'appareil vierge (marqueur pnddrr_skip_demo). */
 try{
-  if(DB.combattants.length===0 && !(HAS_LS&&localStorage.getItem("pnddrr_skip_demo"))){
+  if(window.__PNDDRR_DEMO && DB.combattants.length===0 && !(HAS_LS&&localStorage.getItem("pnddrr_skip_demo"))){
     seedDemo(60,true); DEMO_PRELOADED=true;
   }
 }catch(e){}
