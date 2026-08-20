@@ -13,7 +13,7 @@ function doLogin(){
     })
     .then(db=>{
       if(!db) return;
-      applyServerDb(db);
+      applyServerDb(db, {mergeLocal:true});
       const u=DB.users.find(x=>x.login===login&&x.actif);
       if(!u){ $("loginErr").textContent="Identifiant ou mot de passe incorrect."; $("loginErr").style.display="block"; return; }
       enterSession(u);
@@ -26,10 +26,19 @@ function doLogin(){
       enterSession(u);
     });
 }
-function applyServerDb(db){
+function applyServerDb(db, opts){
   if(!(db&&db.combattants&&db.users)) return false;
+  const login=CUR&&CUR.login;
+  const local=opts&&opts.mergeLocal?{combattants:DB.combattants||[],journal:DB.journal||[],groupes:DB.groupes||[],seq:DB.seq}:null;
   DB=db; migrateDB();
+  if(local && typeof mergeDB==="function" && local.combattants.length){
+    mergeDB(local);
+  }
   window.__PNDDRR_SYNCED=true;
+  if(login){
+    const u=DB.users.find(x=>x.login===login&&x.actif);
+    if(u) CUR=u;
+  }
   if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
   return true;
 }
@@ -45,7 +54,7 @@ function resumeSession(user){
   fetch("/api/db",{credentials:"include"})
     .then(x=>{ if(!x.ok) throw new Error("db"); return x.json(); })
     .then(db=>{
-      applyServerDb(db);
+      applyServerDb(db, {mergeLocal:true});
       const u=DB.users.find(x=>x.login===user.login&&x.actif);
       if(u) enterSession(u,{resume:true});
     })
@@ -106,4 +115,17 @@ function bootSession(){
 }
 bootSession();
 document.addEventListener("pnddrr-bind", bootSession);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") pullServer(); });
+setInterval(pullServer, 20000);
+if(typeof window!=="undefined"){
+  window.addEventListener("storage", e=>{
+    if(e.key!==LS_KEY || !e.newValue || !CUR || _saveT) return;
+    try{
+      const d=JSON.parse(e.newValue);
+      const before=dbFingerprint();
+      if(!applyServerDb(d)) return;
+      if(dbFingerprint()!==before) refreshViewSafe();
+    }catch(err){}
+  });
+}
 

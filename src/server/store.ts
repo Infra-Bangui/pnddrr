@@ -2,19 +2,21 @@ import { mkdir, readFile, writeFile, rename } from "fs/promises";
 import path from "path";
 import { hashPwd, newId } from "./auth";
 
+export type PnddrrUser = {
+  id: string;
+  login: string;
+  pass: string;
+  nom: string;
+  role: string;
+  actif: boolean;
+  perms?: string[];
+  passUpdated?: boolean;
+};
+
 export type PnddrrDb = {
   seq: { comb: number; dem: number };
   groupes: string[];
-  users: Array<{
-    id: string;
-    login: string;
-    pass: string;
-    nom: string;
-    role: string;
-    actif: boolean;
-    perms?: string[];
-    passUpdated?: boolean;
-  }>;
+  users: PnddrrUser[];
   combattants: unknown[];
   journal: unknown[];
   poste?: string;
@@ -22,7 +24,253 @@ export type PnddrrDb = {
   syncs?: unknown[];
   config?: Record<string, unknown>;
   secret?: unknown;
+  /** Client flag: restore JSON replaces the registry instead of merging. */
+  _replace?: boolean;
 };
+
+const STATUT_ORD: Record<string, number> = {
+  abandon: 0,
+  enregistre: 1,
+  desarme: 2,
+  demobilise: 3,
+  reintegration_militaire: 4,
+  reintegration_socio: 4,
+  reintegre: 5,
+  rapatrie: 5,
+};
+
+type Comb = Record<string, unknown> & {
+  id?: string;
+  num?: string;
+  nom?: string;
+  prenom?: string;
+  dn?: string;
+  statut?: string;
+  desarmement?: { armes?: unknown[]; munitions?: unknown[]; date?: string; lieu?: string; agent?: string };
+  demobilisation?: unknown;
+  reintMil?: unknown;
+  reintSocio?: { visites?: unknown[] } & Record<string, unknown>;
+  fin?: unknown;
+  abandon?: unknown;
+};
+
+function asComb(x: unknown): Comb {
+  return x && typeof x === "object" ? (x as Comb) : {};
+}
+
+function normTxt(s: unknown): string {
+  return String(s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function applyPasswords(incoming: PnddrrUser[], current: PnddrrUser[]): PnddrrUser[] {
+  const prevByLogin = new Map(current.map((u) => [u.login, u]));
+  return incoming.map((u) => {
+    const { passUpdated, ...rest } = u;
+    const prev = prevByLogin.get(rest.login);
+    if (!prev) return rest;
+    if (passUpdated && rest.pass) return rest;
+    return { ...rest, pass: prev.pass };
+  });
+}
+
+function bumpSeqFromNums(seq: { comb: number; dem: number }, c: Comb) {
+  const m = String(c.num || "").match(/DDR-(?:[A-Z0-9]+-)?(\d{4})-(\d{1,5})$/i);
+  if (m) seq.comb = Math.max(seq.comb, +m[2]);
+  const carte = c.demobilisation && typeof c.demobilisation === "object" ? (c.demobilisation as { carte?: string }).carte : "";
+  const md = String(carte || "").match(/DEM-(?:[A-Z0-9]+-)?(\d{4})-(\d{1,5})$/i);
+  if (md) seq.dem = Math.max(seq.dem, +md[2]);
+}
+
+function findComb(list: Comb[], inc: Comb): Comb | undefined {
+  if (inc.id) {
+    const byId = list.find((c) => c.id && c.id === inc.id);
+    if (byId) return byId;
+  }
+  if (inc.num) {
+    const byNum = list.find((c) => c.num && c.num === inc.num);
+    if (byNum) return byNum;
+  }
+  if (inc.nom && inc.prenom) {
+    return list.find(
+      (c) =>
+        c.nom === inc.nom &&
+        normTxt(c.prenom) === normTxt(inc.prenom) &&
+        (!inc.dn || !c.dn || c.dn === inc.dn)
+    );
+  }
+  return undefined;
+}
+
+function mergeOneComb(ex: Comb, inc: Comb) {
+  for (const f of ["alias", "dn", "ln", "tel", "sousPref", "commune", "site", "grade", "annees", "zone", "obs", "photo", "vague", "groupe", "souhait", "instr", "nat", "fam", "sexe"]) {
+    if (!ex[f] && inc[f]) ex[f] = inc[f];
+  }
+  const io = STATUT_ORD[String(inc.statut || "")] ?? -1;
+  const eo = STATUT_ORD[String(ex.statut || "")] ?? -1;
+  if (io > eo) ex.statut = inc.statut;
+  if (inc.desarmement) {
+    if (!ex.desarmement) {
+      ex.desarmement = {
+        date: inc.desarmement.date,
+        lieu: inc.desarmement.lieu,
+        agent: inc.desarmement.agent,
+        armes: [],
+        munitions: [],
+      };
+    }
+    const series = new Set(
+      (ex.desarmement.armes || [])
+        .map((a) => (a && typeof a === "object" ? normTxt((a as { serie?: string }).serie) : ""))
+        .filter(Boolean)
+    );
+    for (const a of inc.desarmement.armes || []) {
+      const serie = a && typeof a === "object" ? normTxt((a as { serie?: string }).serie) : "";
+      if (serie && series.has(serie)) continue;
+      ex.desarmement.armes = ex.desarmement.armes || [];
+      ex.desarmement.armes.push(a);
+      if (serie) series.add(serie);
+    }
+    for (const m of inc.desarmement.munitions || []) {
+      ex.desarmement.munitions = ex.desarmement.munitions || [];
+      const mm = m && typeof m === "object" ? (m as { nature?: string; qte?: unknown; unite?: string }) : {};
+      if (!ex.desarmement.munitions.some((x) => {
+        const xx = x && typeof x === "object" ? (x as { nature?: string; qte?: unknown; unite?: string }) : {};
+        return xx.nature === mm.nature && xx.qte === mm.qte && xx.unite === mm.unite;
+      })) {
+        ex.desarmement.munitions.push(m);
+      }
+    }
+  }
+  if (inc.demobilisation && !ex.demobilisation) ex.demobilisation = inc.demobilisation;
+  if (inc.reintMil && !ex.reintMil) ex.reintMil = inc.reintMil;
+  if (inc.reintSocio) {
+    if (!ex.reintSocio) ex.reintSocio = inc.reintSocio;
+    else {
+      const vis = Array.isArray(inc.reintSocio.visites) ? inc.reintSocio.visites : [];
+      ex.reintSocio.visites = ex.reintSocio.visites || [];
+      for (const v of vis) {
+        const vv = v && typeof v === "object" ? (v as { date?: string; obs?: string }) : {};
+        if (!ex.reintSocio.visites.some((x) => {
+          const xx = x && typeof x === "object" ? (x as { date?: string; obs?: string }) : {};
+          return xx.date === vv.date && xx.obs === vv.obs;
+        })) {
+          ex.reintSocio.visites.push(v);
+        }
+      }
+    }
+  }
+  if (inc.fin && !ex.fin) ex.fin = inc.fin;
+  if (inc.abandon && !ex.abandon && ex.statut === "abandon") ex.abandon = inc.abandon;
+}
+
+function mergeCombattants(current: unknown[], incoming: unknown[]): Comb[] {
+  const out = current.map((c) => asComb(JSON.parse(JSON.stringify(c))));
+  for (const raw of incoming) {
+    const inc = asComb(JSON.parse(JSON.stringify(raw)));
+    const ex = findComb(out, inc);
+    if (!ex) {
+      out.push(inc);
+      continue;
+    }
+    mergeOneComb(ex, inc);
+  }
+  return out;
+}
+
+function journalKey(j: unknown): string {
+  if (!j || typeof j !== "object") return "";
+  const x = j as { h?: string; date?: string; user?: string; action?: string; detail?: string };
+  return x.h || [x.date, x.user, x.action, x.detail].join("|");
+}
+
+function mergeJournal(current: unknown[], incoming: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const j of [...incoming, ...current]) {
+    const k = journalKey(j);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(j);
+  }
+  out.sort((a, b) => {
+    const da = a && typeof a === "object" ? String((a as { date?: string }).date || "") : "";
+    const db = b && typeof b === "object" ? String((b as { date?: string }).date || "") : "";
+    return db.localeCompare(da);
+  });
+  if (out.length > 8000) out.length = 8000;
+  return out;
+}
+
+function mergeUsers(current: PnddrrUser[], incoming: PnddrrUser[]): PnddrrUser[] {
+  const withPass = applyPasswords(incoming, current);
+  const byLogin = new Map(current.map((u) => [u.login, { ...u }]));
+  for (const u of withPass) {
+    const prev = byLogin.get(u.login);
+    if (!prev) {
+      byLogin.set(u.login, u);
+      continue;
+    }
+    byLogin.set(u.login, { ...prev, ...u, pass: u.pass || prev.pass });
+  }
+  return [...byLogin.values()];
+}
+
+function mergeGroupes(current: string[], incoming: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const g of [...current, ...incoming]) {
+    const k = normTxt(g);
+    if (!k || seen.has(k) || k === "autre") continue;
+    seen.add(k);
+    out.push(g);
+  }
+  out.push("Autre");
+  return out;
+}
+
+function mergeSyncs(current: unknown[], incoming: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const s of [...incoming, ...current]) {
+    if (!s || typeof s !== "object") continue;
+    const x = s as { date?: string; type?: string; fichier?: string; poste?: string };
+    const k = [x.date, x.type, x.fichier, x.poste].join("|");
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  out.sort((a, b) => {
+    const da = a && typeof a === "object" ? String((a as { date?: string }).date || "") : "";
+    const db = b && typeof b === "object" ? String((b as { date?: string }).date || "") : "";
+    return db.localeCompare(da);
+  });
+  return out.slice(0, 50);
+}
+
+function mergeSharedDb(current: PnddrrDb, incoming: PnddrrDb): PnddrrDb {
+  const combattants = mergeCombattants(current.combattants || [], incoming.combattants || []);
+  const seq = {
+    comb: Math.max(current.seq?.comb || 0, incoming.seq?.comb || 0),
+    dem: Math.max(current.seq?.dem || 0, incoming.seq?.dem || 0),
+  };
+  for (const c of combattants) bumpSeqFromNums(seq, c);
+  return {
+    seq,
+    groupes: mergeGroupes(current.groupes || [], incoming.groupes || []),
+    users: mergeUsers(current.users || [], incoming.users || []),
+    combattants,
+    journal: mergeJournal(current.journal || [], incoming.journal || []),
+    poste: incoming.poste ?? current.poste ?? "",
+    posteCode: incoming.posteCode ?? current.posteCode ?? "",
+    syncs: mergeSyncs(current.syncs || [], incoming.syncs || []),
+    config: { ...(current.config || {}), ...(incoming.config || {}) },
+    secret: incoming.secret ?? current.secret ?? null,
+  };
+}
 
 const DEFAULT_GROUPES = [
   "Ex-Séléka / FPRC",
@@ -108,18 +356,18 @@ export function saveDb(db: PnddrrDb): Promise<void> {
   return writeChain;
 }
 
-/** Keep existing password hashes unless the client marks an explicit change. */
-export async function saveClientDb(incoming: PnddrrDb): Promise<void> {
+/** Keep existing password hashes unless the client marks an explicit change.
+ *  Concurrent sessions merge into the shared registry (union of dossiers).
+ *  Restore JSON sends `_replace: true` to overwrite instead. */
+export async function saveClientDb(incoming: PnddrrDb): Promise<PnddrrDb> {
   const current = await readDb();
-  const prevByLogin = new Map(current.users.map((u) => [u.login, u]));
-  const users = incoming.users.map((u) => {
-    const { passUpdated, ...rest } = u;
-    const prev = prevByLogin.get(rest.login);
-    if (!prev) return rest;
-    if (passUpdated && rest.pass) return rest;
-    return { ...rest, pass: prev.pass };
-  });
-  await saveDb({ ...incoming, users });
+  const replace = incoming._replace === true;
+  const { _replace: _omit, ...rest } = incoming;
+  const next = replace
+    ? { ...rest, users: applyPasswords(incoming.users, current.users) }
+    : mergeSharedDb(current, rest);
+  await saveDb(next);
+  return next;
 }
 
 export function isDbShape(x: unknown): x is PnddrrDb {

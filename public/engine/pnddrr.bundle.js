@@ -114,16 +114,51 @@ function persist(){
   }
   scheduleServerSave();
 }
-var _saveT=null;
+var _saveT=null, _pulling=false;
+function dbFingerprint(){
+  return (DB.combattants||[]).length+":"+(DB.combattants||[]).map(c=>c.id||c.num).join(",");
+}
+function refreshViewSafe(){
+  if(!CUR) return;
+  const app=$("app"); if(!app||!app.classList.contains("on")) return;
+  const modal=$("modalBack"); if(modal&&modal.classList.contains("on")) return;
+  if(VIEW==="nouveau") return;
+  try{ go(VIEW, VIEW==="fiche"?FICHE_ID:undefined); }catch(e){}
+}
 function scheduleServerSave(){
   if(!window.__PNDDRR_SERVER || !window.__PNDDRR_SYNCED) return;
   clearTimeout(_saveT);
   _saveT=setTimeout(pushServer, 500);
 }
 function pushServer(){
+  _saveT=null;
+  const before=dbFingerprint();
   fetch("/api/db",{method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)})
-    .then(r=>{ if(r.status===401) toast("Session expirée — reconnectez-vous."); })
+    .then(r=>{
+      if(r.status===401){ toast("Session expirée — reconnectez-vous."); return null; }
+      if(!r.ok) throw new Error("save");
+      return r.json();
+    })
+    .then(db=>{
+      if(!(db&&db.combattants&&db.users)) return;
+      delete DB._replace;
+      applyServerDb(db);
+      if(CUR && dbFingerprint()!==before) refreshViewSafe();
+    })
     .catch(()=>{});
+}
+function pullServer(){
+  if(!window.__PNDDRR_SERVER || !window.__PNDDRR_SYNCED || !CUR || _pulling || _saveT) return;
+  _pulling=true;
+  const before=dbFingerprint();
+  fetch("/api/db",{credentials:"include"})
+    .then(x=>{ if(!x.ok) throw new Error("db"); return x.json(); })
+    .then(db=>{
+      if(!applyServerDb(db)) return;
+      if(dbFingerprint()!==before) refreshViewSafe();
+    })
+    .catch(()=>{})
+    .finally(()=>{ _pulling=false; });
 }
 function lastPersist(){ try{ return localStorage.getItem(LS_TS); }catch(e){ return null; } }
 /* SHA-256 pure JS (synchrone, hors ligne) — implémentation standard FIPS 180-4 */
@@ -249,7 +284,7 @@ function doLogin(){
     })
     .then(db=>{
       if(!db) return;
-      applyServerDb(db);
+      applyServerDb(db, {mergeLocal:true});
       const u=DB.users.find(x=>x.login===login&&x.actif);
       if(!u){ $("loginErr").textContent="Identifiant ou mot de passe incorrect."; $("loginErr").style.display="block"; return; }
       enterSession(u);
@@ -262,10 +297,19 @@ function doLogin(){
       enterSession(u);
     });
 }
-function applyServerDb(db){
+function applyServerDb(db, opts){
   if(!(db&&db.combattants&&db.users)) return false;
+  const login=CUR&&CUR.login;
+  const local=opts&&opts.mergeLocal?{combattants:DB.combattants||[],journal:DB.journal||[],groupes:DB.groupes||[],seq:DB.seq}:null;
   DB=db; migrateDB();
+  if(local && typeof mergeDB==="function" && local.combattants.length){
+    mergeDB(local);
+  }
   window.__PNDDRR_SYNCED=true;
+  if(login){
+    const u=DB.users.find(x=>x.login===login&&x.actif);
+    if(u) CUR=u;
+  }
   if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
   return true;
 }
@@ -281,7 +325,7 @@ function resumeSession(user){
   fetch("/api/db",{credentials:"include"})
     .then(x=>{ if(!x.ok) throw new Error("db"); return x.json(); })
     .then(db=>{
-      applyServerDb(db);
+      applyServerDb(db, {mergeLocal:true});
       const u=DB.users.find(x=>x.login===user.login&&x.actif);
       if(u) enterSession(u,{resume:true});
     })
@@ -342,6 +386,19 @@ function bootSession(){
 }
 bootSession();
 document.addEventListener("pnddrr-bind", bootSession);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") pullServer(); });
+setInterval(pullServer, 20000);
+if(typeof window!=="undefined"){
+  window.addEventListener("storage", e=>{
+    if(e.key!==LS_KEY || !e.newValue || !CUR || _saveT) return;
+    try{
+      const d=JSON.parse(e.newValue);
+      const before=dbFingerprint();
+      if(!applyServerDb(d)) return;
+      if(dbFingerprint()!==before) refreshViewSafe();
+    }catch(err){}
+  });
+}
 
 
 /* module: shell/nav.js — PNDDRR engine (classic globals) */
@@ -1776,6 +1833,7 @@ function rSauvegarde(){
     :`<p class="small" style="margin-bottom:10px"><b style="color:var(--warn)">⚠ Stockage local indisponible dans cet environnement</b> (aperçu bac à sable) —
       les données sont conservées en mémoire de session uniquement. Ouvrez le fichier directement dans un navigateur (Chrome, Firefox, Edge)
       sur l'appareil de terrain pour activer l'enregistrement automatique hors ligne.</p>`}
+    ${window.__PNDDRR_SERVER?`<p class="small" style="margin-bottom:10px"><b style="color:var(--ok)">✔ Registre partagé.</b> Tous les comptes (admin, agents, suivi) travaillent sur le <b>même registre</b> : un dossier saisi par un utilisateur apparaît chez les autres après quelques secondes.</p>`:""}
     <p class="small muted" style="margin-bottom:10px">L'application est un fichier unique sans serveur : copiez <b>ddr-rca.html</b> sur chaque poste de terrain (clé USB) et ouvrez-le dans le navigateur. Formats d'importation hors ligne : CSV et sauvegardes JSON ; Excel/Word/PDF nécessitent une connexion ponctuelle.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       ${HAS_LS?`<button class="btn sec" onclick="persist();toast('Données enregistrées sur cet appareil.');rSauvegarde()">Enregistrer maintenant</button>`:""}
@@ -2000,6 +2058,7 @@ function restoreJSON(inp){
       const d=JSON.parse(r.result);
       if(!d.combattants||!d.users) throw 0;
       DB=d; migrateDB();
+      DB._replace=true;
       (DB.users||[]).forEach(u=>{ u.passUpdated=true; });
       addSync("Restauration", f.name, `poste source : ${d.poste||"(non précisé)"} — ${DB.combattants.length} dossier(s)`);
       log("Restauration",`Fichier ${f.name} — ${DB.combattants.length} dossier(s)`);
@@ -2026,16 +2085,71 @@ function docEntete(service){
 function docWrap(inner){
   return `<div class="doc"><div class="wm">${ARM_SVG}</div><div class="inner">${inner}</div></div>`;
 }
-function doPrint(html){
-  $("printZone").innerHTML = html;
+function doPrint(html, kind){
+  document.body.classList.toggle("print-pvc", kind==="pvc");
+  const zone=$("printZone");
+  if(zone && zone.parentNode!==document.body) document.body.appendChild(zone);
+  zone.innerHTML = html;
+  zone.className = kind==="pvc" ? "pvc" : "";
   $("prevBody").innerHTML = html;
+  $("prevBody").className = kind==="pvc" ? "pvc" : "";
+  const ttl=document.querySelector("#printPrev .pp-bar b");
+  if(ttl) ttl.textContent = kind==="pvc" ? "Aperçu carte PVC — 8,5 × 5,5 cm (une face par page)" : "Aperçu du document";
   $("printPrev").style.display = "flex";
   document.body.style.overflow = "hidden";
 }
-function prevClose(){ $("printPrev").style.display="none"; document.body.style.overflow=""; }
+function prevClose(){
+  $("printPrev").style.display="none";
+  document.body.style.overflow="";
+  document.body.classList.remove("print-pvc");
+  $("prevBody").className="";
+  $("printZone").innerHTML="";
+  $("printZone").className="";
+  const frame=document.getElementById("pnddrrPrintFrame");
+  if(frame) frame.remove();
+}
 function prevPrint(){
-  try{ window.print(); }
-  catch(e){ toast("Impression indisponible dans cet aperçu — ouvrez le fichier ddr-rca.html directement dans un navigateur (Chrome, Edge, Firefox)."); }
+  const pvc=document.body.classList.contains("print-pvc");
+  const markup=($("printZone")&&$("printZone").innerHTML)||($("prevBody")&&$("prevBody").innerHTML);
+  if(!markup){ toast("Rien à imprimer."); return; }
+  let frame=document.getElementById("pnddrrPrintFrame");
+  if(frame) frame.remove();
+  frame=document.createElement("iframe");
+  frame.id="pnddrrPrintFrame";
+  frame.setAttribute("aria-hidden","true");
+  frame.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none";
+  document.body.appendChild(frame);
+  const doc=frame.contentDocument;
+  const headBits=[...document.querySelectorAll("link[rel='stylesheet'], style")].map(n=>n.outerHTML).join("");
+  const page=pvc?"size:85mm 55mm;margin:0":"size:A4 portrait;margin:12mm";
+  doc.open();
+  doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Impression PNDDRR</title>${headBits}
+<style>
+@page{${page}}
+html,body{margin:0!important;padding:0!important;background:#fff!important;height:auto!important;overflow:visible!important}
+body>*:not(#printZone){display:none!important}
+#printZone{display:block!important;visibility:visible!important;position:static!important;left:auto!important;top:auto!important;width:${pvc?"85mm":"auto"}!important;height:auto!important}
+#printZone *{visibility:visible!important}
+</style></head>
+<body class="${pvc?"print-pvc":""}"><div id="printZone" class="${pvc?"pvc":""}">${markup}</div></body></html>`);
+  doc.close();
+  let printed=false;
+  const run=()=>{
+    if(printed) return;
+    printed=true;
+    try{ frame.contentWindow.focus(); frame.contentWindow.print(); }
+    catch(e){ toast("Impression indisponible dans cet aperçu — utilisez Chrome, Edge ou Firefox."); }
+  };
+  const links=[...doc.querySelectorAll("link[rel='stylesheet']")];
+  if(!links.length){ setTimeout(run, 80); return; }
+  let left=links.length;
+  const one=()=>{ left-=1; if(left<=0) setTimeout(run, 80); };
+  links.forEach(l=>{
+    if(l.sheet){ one(); return; }
+    l.addEventListener("load", one);
+    l.addEventListener("error", one);
+  });
+  setTimeout(run, 1200);
 }
 function printFiche(id){
   const c=DB.combattants.find(x=>x.id===id);
@@ -2127,46 +2241,44 @@ function barcode39(txt, h){
 }
 function carteHtml(c){
   const dm=c.demobilisation;
-  return `<div class="doc"><div class="inner">
-    <div class="carte">
+  const qr=cfg("carteQR")!==false?qrSvg("PNDDRR|"+dm.carte+"|"+authCode(c),48):"";
+  const cb=cfg("carteCodeBarres")!==false?`${barcode39(dm.carte,22)}<div class="cbar-lbl">${esc(dm.carte)}</div>`:"";
+  return `
+    <div class="carte-pvc recto">
       <div class="ch chc"><div class="emb">${ARM_SVG}</div>
         <div class="tx">
           <b>RÉPUBLIQUE CENTRAFRICAINE</b>
-          <small><b>UEPNDDR</b> — Unité d'Exécution du Programme National de Désarmement, Démobilisation, Réintégration et Rapatriement</small>
+          <small>UEPNDDR</small>
           <div class="ct">CARTE DE DÉMOBILISÉ</div>
-          <small>N° ${dm.carte}</small>
+          <small>N° ${esc(dm.carte)}</small>
         </div>
       </div>
       <div class="cb">
         <div class="ph">${c.photo?`<img src="${c.photo}">`:"PHOTO"}</div>
         <table>
-          <tr><td><b>Nom :</b></td><td>${esc(c.nom)}</td></tr>
-          <tr><td><b>Prénom(s) :</b></td><td>${esc(c.prenom)}</td></tr>
-          <tr><td><b>Né(e) le :</b></td><td>${fmtD(c.dn)} à ${esc(c.ln)||"—"}</td></tr>
-          <tr><td><b>Sexe :</b></td><td>${c.sexe==="M"?"Masculin":"Féminin"}</td></tr>
-          <tr><td><b>Dossier :</b></td><td>${c.num}</td></tr>
-          <tr><td><b>Démobilisé le :</b></td><td>${fmtD(dm.date)}</td></tr>
+          <tr><td>Nom</td><td>${esc(c.nom)}</td></tr>
+          <tr><td>Prénom(s)</td><td>${esc(c.prenom)}</td></tr>
+          <tr><td>Né(e) le</td><td>${fmtD(c.dn)}</td></tr>
+          <tr><td>Sexe</td><td>${c.sexe==="M"?"M":"F"}</td></tr>
+          <tr><td>Dossier</td><td>${esc(c.num)}</td></tr>
+          <tr><td>Démobilisé</td><td>${fmtD(dm.date)}</td></tr>
         </table>
       </div>
-      <div class="cauth">CODE D'AUTHENTIFICATION&nbsp;: <b>${authCode(c)}</b></div>
-      <div class="cf"><span>Délivrée à ${esc(dm.lieu)}</span><span>${esc(cfg("signataireCarte")||"Le Coordonnateur de l'UEPNDDR")}</span></div>
+      <div class="cauth">AUTH. <b>${authCode(c)}</b></div>
+      <div class="cf"><span>${esc(dm.lieu)}</span><span>${esc(cfg("signataireCarte")||"Le Coordonnateur")}</span></div>
     </div>
-    <div class="carte">
-      <div class="ch"><div><b>DISPOSITIONS</b></div></div>
-      <div class="cb"><table style="font-size:10.5px">
-        <tr><td>La présente carte atteste que son titulaire a été officiellement démobilisé dans le cadre du Programme National de Désarmement, Démobilisation, Réintégration et Rapatriement. Elle est strictement personnelle. En cas de perte, en informer immédiatement l'antenne PNDDRR la plus proche.</td></tr>
-      </table>
-      ${cfg("carteQR")!==false||cfg("carteCodeBarres")!==false?`<div class="cbar-box"><div style="display:flex;align-items:center;gap:12px;justify-content:center">
-        ${cfg("carteQR")!==false?`<div>${qrSvg("PNDDRR|"+dm.carte+"|"+authCode(c),84)}</div>`:""}
-        ${cfg("carteCodeBarres")!==false?`<div style="flex:1;min-width:0">${barcode39(dm.carte,40)}<div class="cbar-lbl">${esc(dm.carte)}</div></div>`:""}
-      </div></div>`:""}</div>
-      <div class="cf"><span>Carte n° ${dm.carte}</span><span>République Centrafricaine</span></div>
-    </div>
-  </div></div>`;
+    <div class="carte-pvc verso">
+      <div class="ch"><b>DISPOSITIONS</b></div>
+      <div class="cb verso-body">
+        <p>Carte personnelle attestant la démobilisation officielle au titre du PNDDRR. En cas de perte, prévenir l'antenne la plus proche.</p>
+        ${qr||cb?`<div class="cbar-box">${qr?`<div class="cqr-wrap">${qr}</div>`:""}${cb?`<div class="cbar-wrap">${cb}</div>`:""}</div>`:""}
+      </div>
+      <div class="cf"><span>N° ${esc(dm.carte)}</span><span>République Centrafricaine</span></div>
+    </div>`;
 }
 function printCarte(id){
   const c=DB.combattants.find(x=>x.id===id);
-  doPrint(carteHtml(c));
+  doPrint(carteHtml(c), "pvc");
   log("Impression",`Carte de démobilisé ${c.demobilisation.carte}`);
 }
 var DOC_Q="";
@@ -2200,7 +2312,9 @@ function rDocs(){
     <span style="display:flex;gap:7px">
       <button class="btn sm sec" onclick="exportCartesCSV()">Exporter CSV</button>
       <button class="btn sm sec" ${cartes.length?"":"disabled"} onclick="printToutesCartes()">Imprimer toutes les cartes</button>
-    </span></div><div class="pb nopad">${
+    </span></div>
+    <p class="small muted" style="margin:0;padding:10px 16px 0">Impression : <b>8,5 × 5,5 cm</b> (carte PVC, une face par page). Dans la boîte d'impression, choisir le format 85 × 55 mm et les marges à zéro.</p>
+    <div class="pb nopad">${
     cartes.length?`<table><thead><tr><th>N° de carte</th><th>Titulaire</th><th>Dossier</th><th>Démobilisé le</th><th>Lieu</th><th>Vague</th><th>Actions</th></tr></thead><tbody>${
       cartes.map(c=>`<tr><td><b>${esc(c.demobilisation.carte)}</b></td>
       <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
@@ -2277,7 +2391,7 @@ function exportAttestsCSV(){
 }
 function printToutesCartes(){
   const L=DB.combattants.filter(c=>c.demobilisation&&docMatch(c));
-  doPrint(L.map(c=>carteHtml(c)).join('<div style="page-break-after:always"></div>'));
+  doPrint(L.map(c=>carteHtml(c)).join(""), "pvc");
   log("Impression",`${L.length} carte(s) de démobilisé (lot)`);
 }
 function printToutesAttests(){

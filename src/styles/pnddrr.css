@@ -182,9 +182,11 @@ header.top .date{font-size:12.5px;color:var(--muted)}
 #printPrev #prevBody{max-width:860px;margin:0 auto;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.35);border-radius:4px}
 #printPrev #prevBody .doc{page-break-after:auto;border-bottom:2px dashed var(--line)}
 @media print{
-  body>*{display:none !important}
-  #printZone{display:block !important}
-  body{background:#fff}
+  html, body{background:#fff !important;margin:0 !important;padding:0 !important;height:auto !important;overflow:visible !important}
+  body > *:not(#printZone){display:none !important}
+  #printZone{display:block !important;visibility:visible !important;position:static !important;left:auto !important;top:auto !important;width:auto;margin:0;padding:0}
+  #printZone *{visibility:visible !important}
+  body.print-pvc #printZone.pvc{width:85mm}
 }
 .doc{font-family:'Times New Roman',Georgia,serif;color:#000;padding:36px 46px;page-break-after:always;position:relative}
 .doc .wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.06;z-index:0}
@@ -205,26 +207,41 @@ header.top .date{font-size:12.5px;color:var(--muted)}
 .doc .sig .c{text-align:center;width:44%}
 .doc .sig .ligne{margin-top:56px;border-top:1px solid #000;padding-top:4px}
 .doc p{font-size:13px;line-height:1.7;text-align:justify;margin:9px 0}
-.carte{width:390px;border:2.5px solid var(--teal-dark);border-radius:12px;overflow:hidden;font-family:var(--font);margin:0 auto 22px;page-break-inside:avoid}
-.carte .ch{background:var(--teal-dark);color:#fff;padding:9px 13px;display:flex;gap:10px;align-items:center}
-.carte .ch .emb{width:38px;height:38px}
-.carte .ch b{font-size:12px;display:block;line-height:1.3}
-.carte .ch small{font-size:9.5px;opacity:.9}
-.carte .ch.chc{gap:10px;align-items:flex-start;padding:6px 11px 6px}
-.carte .ch.chc .emb{width:42px;height:40px;flex-shrink:0;margin-top:1px}
-.carte .ch.chc .tx{flex:1;text-align:center;line-height:1.2}
-.carte .ch.chc .tx b{font-size:12px}
-.carte .ch.chc small{display:block;line-height:1.2;margin-top:1px}
-.carte .ch.chc .ct{font-size:13px;font-weight:800;letter-spacing:1.5px;color:var(--jaune);margin-top:2px}
-.carte .cauth{text-align:center;font-size:10px;letter-spacing:.8px;padding:4px 8px;background:var(--teal-light);color:var(--teal-dark);border-top:1px dashed var(--teal)}
-.carte .cauth b{font-family:'Courier New',monospace;font-size:11.5px}
-.carte .cbar-box{text-align:center;padding:8px 20px 2px;background:#fff}
-.carte .cbar-box .cbar{width:100%;max-width:300px;height:44px;display:block;margin:0 auto}
-.carte .cbar-lbl{font-family:'Courier New',monospace;font-size:10.5px;letter-spacing:2.5px;margin-top:2px;color:#000}
-.carte .cb{padding:11px 13px;display:flex;gap:12px;background:linear-gradient(135deg,#fff 70%,var(--teal-light))}
-.carte .cb .ph{width:78px;height:92px;border:1px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted);overflow:hidden}
-.carte .cb .ph img{width:100%;height:100%;object-fit:cover}
-.carte .cb table{font-size:11px;background:transparent}
-.carte .cb td{border:none;padding:1.5px 4px}
-.carte .cf{border-top:1px solid var(--line);padding:6px 13px;font-size:9.5px;color:var(--muted);display:flex;justify-content:space-between;background:#fff}
+.carte, .carte-pvc{
+  width:85mm;height:55mm;border:.45mm solid var(--teal-dark);overflow:hidden;font-family:var(--font);
+  display:flex;flex-direction:column;page-break-inside:avoid;break-inside:avoid;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fff
+}
+.carte{margin:0 auto 22px;border-radius:2mm}
+.carte-pvc{margin:0;border-radius:0;page-break-after:always;break-after:page}
+.carte-pvc:last-child{page-break-after:auto;break-after:auto}
+.carte .ch, .carte-pvc .ch{background:var(--teal-dark);color:#fff;padding:1.4mm 2.2mm;display:flex;gap:1.8mm;align-items:center;flex-shrink:0}
+.carte .ch .emb, .carte-pvc .ch .emb{width:7.2mm;height:7.2mm}
+.carte .ch .emb svg, .carte-pvc .ch .emb svg{width:100%;height:100%;display:block}
+.carte .ch b, .carte-pvc .ch b{font-size:7.2pt;display:block;line-height:1.15}
+.carte .ch small, .carte-pvc .ch small{font-size:6pt;opacity:.92}
+.carte .ch.chc, .carte-pvc .ch.chc{gap:1.8mm;align-items:flex-start;padding:1.2mm 2mm}
+.carte .ch.chc .emb, .carte-pvc .ch.chc .emb{width:8mm;height:7.6mm;flex-shrink:0;margin-top:.2mm}
+.carte .ch.chc .tx, .carte-pvc .ch.chc .tx{flex:1;text-align:center;line-height:1.15}
+.carte .ch.chc .tx b, .carte-pvc .ch.chc .tx b{font-size:7.4pt}
+.carte .ch.chc small, .carte-pvc .ch.chc small{display:block;line-height:1.15;margin-top:.2mm}
+.carte .ch.chc .ct, .carte-pvc .ch.chc .ct{font-size:8pt;font-weight:800;letter-spacing:.4pt;color:var(--jaune);margin-top:.4mm}
+.carte .cauth, .carte-pvc .cauth{text-align:center;font-size:6.2pt;letter-spacing:.4pt;padding:.6mm 1.6mm;background:var(--teal-light);color:var(--teal-dark);border-top:.2mm dashed var(--teal);flex-shrink:0}
+.carte .cauth b, .carte-pvc .cauth b{font-family:'Courier New',monospace;font-size:7.2pt}
+.carte .cbar-box, .carte-pvc .cbar-box{display:flex;align-items:center;justify-content:center;gap:2.4mm;padding:1mm 0 0;background:transparent}
+.carte .cbar-box .cbar, .carte-pvc .cbar-box .cbar{width:100%;max-width:42mm;height:5.5mm;display:block;margin:0 auto}
+.carte .cbar-lbl, .carte-pvc .cbar-lbl{font-family:'Courier New',monospace;font-size:6pt;letter-spacing:.6pt;margin-top:.3mm;color:#000;text-align:center}
+.carte .cb, .carte-pvc .cb{padding:1.6mm 2.2mm;display:flex;gap:2mm;flex:1;min-height:0;background:linear-gradient(135deg,#fff 70%,var(--teal-light))}
+.carte-pvc .cb.verso-body{flex-direction:column;gap:1.2mm}
+.carte-pvc .cb.verso-body p{margin:0;font-size:6.4pt;line-height:1.25;text-align:justify;font-family:var(--font)}
+.carte .cb .ph, .carte-pvc .cb .ph{width:14mm;height:18mm;border:.25mm solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:5.5pt;color:var(--muted);overflow:hidden;background:#fff}
+.carte .cb .ph img, .carte-pvc .cb .ph img{width:100%;height:100%;object-fit:cover}
+.carte .cb table, .carte-pvc .cb table{font-size:6.6pt;background:transparent;width:100%}
+.carte .cb td, .carte-pvc .cb td{border:none;padding:.15mm .6mm;vertical-align:top;line-height:1.2}
+.carte .cb td:first-child, .carte-pvc .cb td:first-child{color:var(--muted);white-space:nowrap;width:22mm;font-weight:600}
+.carte .cf, .carte-pvc .cf{border-top:.25mm solid var(--line);padding:.7mm 2.2mm;font-size:5.8pt;color:var(--muted);display:flex;justify-content:space-between;gap:2mm;background:#fff;flex-shrink:0}
+.carte-pvc .cqr-wrap svg{display:block;width:12mm;height:12mm}
+.carte-pvc .cbar-wrap{flex:1;min-width:0}
+#printPrev #prevBody.pvc{max-width:none;width:auto;background:transparent;box-shadow:none;display:flex;flex-direction:column;align-items:center;gap:16px;padding:4px 0}
+#printPrev #prevBody.pvc .carte-pvc{page-break-after:auto;break-after:auto;box-shadow:0 6px 18px rgba(0,0,0,.28)}
 

@@ -102,7 +102,7 @@ export function PnddrrApp() {
     }
 
     const script = document.createElement("script");
-    script.src = "/engine/pnddrr.bundle.js?v=session-3";
+    script.src = "/engine/pnddrr.bundle.js?v=shared-db-1";
     script.dataset.pnddrrEngine = "1";
     script.onerror = () => setStatus("error");
     document.body.appendChild(script);

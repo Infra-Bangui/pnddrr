@@ -12,6 +12,7 @@ function rSauvegarde(){
     :`<p class="small" style="margin-bottom:10px"><b style="color:var(--warn)">⚠ Stockage local indisponible dans cet environnement</b> (aperçu bac à sable) —
       les données sont conservées en mémoire de session uniquement. Ouvrez le fichier directement dans un navigateur (Chrome, Firefox, Edge)
       sur l'appareil de terrain pour activer l'enregistrement automatique hors ligne.</p>`}
+    ${window.__PNDDRR_SERVER?`<p class="small" style="margin-bottom:10px"><b style="color:var(--ok)">✔ Registre partagé.</b> Tous les comptes (admin, agents, suivi) travaillent sur le <b>même registre</b> : un dossier saisi par un utilisateur apparaît chez les autres après quelques secondes.</p>`:""}
     <p class="small muted" style="margin-bottom:10px">L'application est un fichier unique sans serveur : copiez <b>ddr-rca.html</b> sur chaque poste de terrain (clé USB) et ouvrez-le dans le navigateur. Formats d'importation hors ligne : CSV et sauvegardes JSON ; Excel/Word/PDF nécessitent une connexion ponctuelle.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       ${HAS_LS?`<button class="btn sec" onclick="persist();toast('Données enregistrées sur cet appareil.');rSauvegarde()">Enregistrer maintenant</button>`:""}
@@ -236,6 +237,7 @@ function restoreJSON(inp){
       const d=JSON.parse(r.result);
       if(!d.combattants||!d.users) throw 0;
       DB=d; migrateDB();
+      DB._replace=true;
       (DB.users||[]).forEach(u=>{ u.passUpdated=true; });
       addSync("Restauration", f.name, `poste source : ${d.poste||"(non précisé)"} — ${DB.combattants.length} dossier(s)`);
       log("Restauration",`Fichier ${f.name} — ${DB.combattants.length} dossier(s)`);

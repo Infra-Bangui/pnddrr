@@ -57,16 +57,51 @@ function persist(){
   }
   scheduleServerSave();
 }
-var _saveT=null;
+var _saveT=null, _pulling=false;
+function dbFingerprint(){
+  return (DB.combattants||[]).length+":"+(DB.combattants||[]).map(c=>c.id||c.num).join(",");
+}
+function refreshViewSafe(){
+  if(!CUR) return;
+  const app=$("app"); if(!app||!app.classList.contains("on")) return;
+  const modal=$("modalBack"); if(modal&&modal.classList.contains("on")) return;
+  if(VIEW==="nouveau") return;
+  try{ go(VIEW, VIEW==="fiche"?FICHE_ID:undefined); }catch(e){}
+}
 function scheduleServerSave(){
   if(!window.__PNDDRR_SERVER || !window.__PNDDRR_SYNCED) return;
   clearTimeout(_saveT);
   _saveT=setTimeout(pushServer, 500);
 }
 function pushServer(){
+  _saveT=null;
+  const before=dbFingerprint();
   fetch("/api/db",{method:"PUT",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)})
-    .then(r=>{ if(r.status===401) toast("Session expirée — reconnectez-vous."); })
+    .then(r=>{
+      if(r.status===401){ toast("Session expirée — reconnectez-vous."); return null; }
+      if(!r.ok) throw new Error("save");
+      return r.json();
+    })
+    .then(db=>{
+      if(!(db&&db.combattants&&db.users)) return;
+      delete DB._replace;
+      applyServerDb(db);
+      if(CUR && dbFingerprint()!==before) refreshViewSafe();
+    })
     .catch(()=>{});
+}
+function pullServer(){
+  if(!window.__PNDDRR_SERVER || !window.__PNDDRR_SYNCED || !CUR || _pulling || _saveT) return;
+  _pulling=true;
+  const before=dbFingerprint();
+  fetch("/api/db",{credentials:"include"})
+    .then(x=>{ if(!x.ok) throw new Error("db"); return x.json(); })
+    .then(db=>{
+      if(!applyServerDb(db)) return;
+      if(dbFingerprint()!==before) refreshViewSafe();
+    })
+    .catch(()=>{})
+    .finally(()=>{ _pulling=false; });
 }
 function lastPersist(){ try{ return localStorage.getItem(LS_TS); }catch(e){ return null; } }
 /* SHA-256 pure JS (synchrone, hors ligne) — implémentation standard FIPS 180-4 */

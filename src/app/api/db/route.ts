@@ -32,6 +32,6 @@ export async function PUT(req: Request) {
   if (body.users.length < 1) {
     return NextResponse.json({ error: "Au moins un compte utilisateur est requis" }, { status: 400 });
   }
-  await saveClientDb(body);
-  return NextResponse.json({ ok: true });
+  const db = await saveClientDb(body);
+  return NextResponse.json(db, { headers: { "Cache-Control": "private, no-store" } });
 }
