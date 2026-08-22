@@ -16,6 +16,8 @@ services:
       PNDDRR_SECURE_COOKIE: ${PNDDRR_SECURE_COOKIE:-0}
     volumes:
       - pnddrr-data:/data
+    mem_limit: 2g
+    memswap_limit: 2g
     security_opt:
       - no-new-privileges:true
     healthcheck:
