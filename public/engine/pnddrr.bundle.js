@@ -2002,10 +2002,21 @@ function mergeJSONFile(inp){
 }
 function mergeDB(d){
   const rep={ajoutes:0,fusionnes:0,armes:0,groupes:0};
+  function armeKey(a){
+    const serie=normTxt(a&&a.serie); if(serie) return "s:"+serie;
+    return "n:"+[a&&a.type,a&&a.marque,a&&a.calibre,a&&a.etat,a&&a.mun].map(normTxt).join("|");
+  }
+  function dedupeArmes(armes){
+    const seen=new Set(), out=[];
+    for(const a of armes||[]){ const k=armeKey(a); if(!k||seen.has(k)) continue; seen.add(k); out.push(a); }
+    return out;
+  }
   (d.groupes||[]).forEach(g=>{ if(!GROUPES.some(x=>normTxt(x)===normTxt(g))){ GROUPES.splice(GROUPES.indexOf("Autre"),0,g); rep.groupes++; } });
   (d.users||[]).forEach(u=>{ if(!DB.users.some(x=>x.login===u.login)) DB.users.push(u); });
-  const series=new Set(allArmes().map(a=>normTxt(a.serie)).filter(x=>x));
+  const keys=new Set();
+  DB.combattants.forEach(c=>((c.desarmement&&c.desarmement.armes)||[]).forEach(a=>{ const k=armeKey(a); if(k) keys.add(k); }));
   for(const inc of d.combattants||[]){
+    if(inc.desarmement&&inc.desarmement.armes) inc.desarmement.armes=dedupeArmes(inc.desarmement.armes);
     let ex=DB.combattants.find(c=>c.num===inc.num)
       ||DB.combattants.find(c=>c.nom===inc.nom&&normTxt(c.prenom)===normTxt(inc.prenom)&&(!inc.dn||!c.dn||c.dn===inc.dn));
     if(!ex){
@@ -2013,17 +2024,17 @@ function mergeDB(d){
       if(m) DB.seq.comb=Math.max(DB.seq.comb,+m[2]); else inc.num=numDossier();
       if(inc.demobilisation&&inc.demobilisation.carte){ const md=inc.demobilisation.carte.match(/^DEM-(\d{4})-(\d{1,5})$/); if(md) DB.seq.dem=Math.max(DB.seq.dem,+md[2]); }
       DB.combattants.push(inc); rep.ajoutes++;
-      if(inc.desarmement) inc.desarmement.armes.forEach(a=>{ if(a.serie) series.add(normTxt(a.serie)); });
+      ((inc.desarmement&&inc.desarmement.armes)||[]).forEach(a=>{ const k=armeKey(a); if(k) keys.add(k); });
       continue;
     }
-    // fusion : champs vides complétés, statut le plus avancé conservé
     ["alias","dn","ln","tel","sousPref","commune","site","grade","annees","zone","obs","photo"].forEach(f=>{ if(!ex[f]&&inc[f]) ex[f]=inc[f]; });
     if(STATUTS[inc.statut]&&STATUTS[inc.statut].ord>STATUTS[ex.statut].ord) ex.statut=inc.statut;
     if(inc.desarmement){
       if(!ex.desarmement) ex.desarmement={date:inc.desarmement.date,lieu:inc.desarmement.lieu,agent:inc.desarmement.agent,armes:[],munitions:[]};
+      ex.desarmement.armes=dedupeArmes(ex.desarmement.armes||[]);
       for(const a of inc.desarmement.armes||[]){
-        if(a.serie&&series.has(normTxt(a.serie))) continue;
-        ex.desarmement.armes.push(a); if(a.serie) series.add(normTxt(a.serie)); rep.armes++;
+        const k=armeKey(a); if(!k||keys.has(k)) continue;
+        ex.desarmement.armes.push(a); keys.add(k); rep.armes++;
       }
       for(const m of inc.desarmement.munitions||[]){
         ex.desarmement.munitions=ex.desarmement.munitions||[];
@@ -2040,6 +2051,7 @@ function mergeDB(d){
     if(inc.abandon&&!ex.abandon&&ex.statut==="abandon") ex.abandon=inc.abandon;
     rep.fusionnes++;
   }
+  DB.combattants.forEach(c=>{ if(c.desarmement&&c.desarmement.armes) c.desarmement.armes=dedupeArmes(c.desarmement.armes); });
   (d.journal||[]).forEach(j=>{ if(!DB.journal.some(x=>x.date===j.date&&x.user===j.user&&x.action===j.action)) DB.journal.push(j); });
   DB.journal.sort((a,b)=>b.date.localeCompare(a.date));
   return rep;

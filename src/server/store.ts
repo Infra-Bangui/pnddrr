@@ -105,6 +105,34 @@ function findComb(list: Comb[], inc: Comb): Comb | undefined {
   return undefined;
 }
 
+function armeKey(a: unknown): string {
+  if (!a || typeof a !== "object") return "";
+  const x = a as { serie?: string; type?: string; marque?: string; calibre?: string; etat?: string; mun?: string };
+  const serie = normTxt(x.serie);
+  if (serie) return "s:" + serie;
+  return "n:" + [x.type, x.marque, x.calibre, x.etat, x.mun].map(normTxt).join("|");
+}
+
+function dedupeArmes(armes: unknown[] | undefined): unknown[] {
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const a of armes || []) {
+    const k = armeKey(a);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(a);
+  }
+  return out;
+}
+
+function sanitizeDb(db: PnddrrDb): PnddrrDb {
+  for (const raw of db.combattants || []) {
+    const c = asComb(raw);
+    if (c.desarmement?.armes) c.desarmement.armes = dedupeArmes(c.desarmement.armes);
+  }
+  return db;
+}
+
 function mergeOneComb(ex: Comb, inc: Comb) {
   for (const f of ["alias", "dn", "ln", "tel", "sousPref", "commune", "site", "grade", "annees", "zone", "obs", "photo", "vague", "groupe", "souhait", "instr", "nat", "fam", "sexe"]) {
     if (!ex[f] && inc[f]) ex[f] = inc[f];
@@ -122,17 +150,13 @@ function mergeOneComb(ex: Comb, inc: Comb) {
         munitions: [],
       };
     }
-    const series = new Set(
-      (ex.desarmement.armes || [])
-        .map((a) => (a && typeof a === "object" ? normTxt((a as { serie?: string }).serie) : ""))
-        .filter(Boolean)
-    );
+    const keys = new Set((ex.desarmement.armes || []).map(armeKey).filter(Boolean));
     for (const a of inc.desarmement.armes || []) {
-      const serie = a && typeof a === "object" ? normTxt((a as { serie?: string }).serie) : "";
-      if (serie && series.has(serie)) continue;
+      const k = armeKey(a);
+      if (!k || keys.has(k)) continue;
       ex.desarmement.armes = ex.desarmement.armes || [];
       ex.desarmement.armes.push(a);
-      if (serie) series.add(serie);
+      keys.add(k);
     }
     for (const m of inc.desarmement.munitions || []) {
       ex.desarmement.munitions = ex.desarmement.munitions || [];
@@ -329,8 +353,8 @@ export async function readDb(): Promise<PnddrrDb> {
     if (!Array.isArray(db.combattants) || !Array.isArray(db.users)) {
       throw new Error("Registre invalide (combattants/users manquants)");
     }
-    cachedDb = db;
-    return db;
+    cachedDb = sanitizeDb(db);
+    return cachedDb;
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     if (err.code !== "ENOENT") throw e;
@@ -347,6 +371,7 @@ export async function readDb(): Promise<PnddrrDb> {
 }
 
 async function atomicWrite(db: PnddrrDb): Promise<void> {
+  sanitizeDb(db);
   await mkdir(dataDir(), { recursive: true });
   const dest = dbPath();
   const tmp = dest + "." + newId() + ".tmp";
@@ -367,9 +392,11 @@ export async function saveClientDb(incoming: PnddrrDb): Promise<PnddrrDb> {
   const current = await readDb();
   const replace = incoming._replace === true;
   const { _replace: _omit, ...rest } = incoming;
-  const next = replace
-    ? { ...rest, users: applyPasswords(incoming.users, current.users) }
-    : mergeSharedDb(current, rest);
+  const next = sanitizeDb(
+    replace
+      ? { ...rest, users: applyPasswords(incoming.users, current.users) }
+      : mergeSharedDb(current, rest)
+  );
   await saveDb(next);
   return next;
 }
