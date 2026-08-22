@@ -9,6 +9,7 @@ services:
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
       DATA_DIR: /data
+      NODE_OPTIONS: "--max-old-space-size=1536"
       SESSION_SECRET: ${SESSION_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PNDDRR_DEMO: ${PNDDRR_DEMO:-0}

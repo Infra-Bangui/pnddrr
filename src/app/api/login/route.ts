@@ -6,27 +6,45 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const hits = new Map<string, { n: number; t: number }>();
+const FAIL_WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILS = 20;
 
 function clientIp(req: Request): string {
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
   const xf = req.headers.get("x-forwarded-for");
-  if (xf) return xf.split(",")[0].trim();
-  return req.headers.get("x-real-ip") || "local";
+  if (xf) {
+    const parts = xf.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[0];
+  }
+  return "local";
 }
 
-function limited(ip: string): boolean {
-  const now = Date.now();
+function tooManyFails(ip: string): boolean {
   const row = hits.get(ip);
-  if (!row || now - row.t > 10 * 60 * 1000) {
-    hits.set(ip, { n: 1, t: now });
+  if (!row) return false;
+  if (Date.now() - row.t > FAIL_WINDOW_MS) {
+    hits.delete(ip);
     return false;
   }
+  return row.n >= MAX_FAILS;
+}
+
+function recordFail(ip: string) {
+  const now = Date.now();
+  const row = hits.get(ip);
+  if (!row || now - row.t > FAIL_WINDOW_MS) {
+    hits.set(ip, { n: 1, t: now });
+    return;
+  }
   row.n += 1;
-  return row.n > 8;
 }
 
 export async function POST(req: Request) {
   const ip = clientIp(req);
-  if (limited(ip)) {
+  if (tooManyFails(ip)) {
     return NextResponse.json({ error: "Trop de tentatives. Réessayez plus tard." }, { status: 429 });
   }
   let body: { login?: string; password?: string };
@@ -49,8 +67,10 @@ export async function POST(req: Request) {
   }
   const user = db.users.find((u) => u.login === login && u.actif);
   if (!user || !pwdOk(user.pass, password)) {
+    recordFail(ip);
     return NextResponse.json({ error: "Identifiant ou mot de passe incorrect." }, { status: 401 });
   }
+  hits.delete(ip);
   const res = NextResponse.json({
     ok: true,
     user: { login: user.login, nom: user.nom, role: user.role },

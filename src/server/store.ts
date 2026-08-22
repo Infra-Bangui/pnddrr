@@ -294,6 +294,7 @@ function dbPath(): string {
 }
 
 let writeChain: Promise<void> = Promise.resolve();
+let cachedDb: PnddrrDb | null = null;
 
 function emptyDb(adminPassword: string): PnddrrDb {
   return {
@@ -320,6 +321,7 @@ function emptyDb(adminPassword: string): PnddrrDb {
 }
 
 export async function readDb(): Promise<PnddrrDb> {
+  if (cachedDb) return cachedDb;
   await mkdir(dataDir(), { recursive: true });
   try {
     const raw = await readFile(dbPath(), "utf8");
@@ -327,6 +329,7 @@ export async function readDb(): Promise<PnddrrDb> {
     if (!Array.isArray(db.combattants) || !Array.isArray(db.users)) {
       throw new Error("Registre invalide (combattants/users manquants)");
     }
+    cachedDb = db;
     return db;
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
@@ -349,6 +352,7 @@ async function atomicWrite(db: PnddrrDb): Promise<void> {
   const tmp = dest + "." + newId() + ".tmp";
   await writeFile(tmp, JSON.stringify(db), "utf8");
   await rename(tmp, dest);
+  cachedDb = db;
 }
 
 export function saveDb(db: PnddrrDb): Promise<void> {
