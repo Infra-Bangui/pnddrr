@@ -3,6 +3,9 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // `pg` est un module CommonJS avec des require() optionnels (pg-native) :
+  // le garder externe évite que le bundler serveur essaie de l'inliner.
+  serverExternalPackages: ["pg"],
   allowedDevOrigins: ["192.168.20.71"],
   turbopack: {
     root: path.join(__dirname),
