@@ -8,6 +8,9 @@ services:
     environment:
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
+      # Registre stocké dans PostgreSQL (data01). Si DATABASE_URL est absent,
+      # l'app retombe sur le fichier DATA_DIR/pnddrr.json (dev local / secours).
+      DATABASE_URL: ${DATABASE_URL:-}
       DATA_DIR: /data
       NODE_OPTIONS: "--max-old-space-size=1536"
       SESSION_SECRET: ${SESSION_SECRET}

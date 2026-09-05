@@ -3,7 +3,9 @@ ARG NODE_VERSION=20-bookworm-slim
 FROM node:${NODE_VERSION} AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# npm install (et non npm ci) : le lockfile peut être en retard sur package.json.
+# Il est réaligné dans l'image ; penser à le régénérer en local quand c'est possible.
+RUN npm install --no-audit --no-fund
 
 FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
