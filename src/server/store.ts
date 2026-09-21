@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, rename } from "fs/promises";
 import path from "path";
+import { Pool } from "pg";
 import { hashPwd, newId } from "./auth";
 
 export type PnddrrUser = {
@@ -318,12 +319,88 @@ const DEFAULT_GROUPES = [
   "Autre",
 ];
 
+// --- Backend de stockage ---------------------------------------------------
+// Le registre entier est un unique objet JSON. Il est stocké :
+//   - dans PostgreSQL (table `registry`, 1 ligne, colonne jsonb) si DATABASE_URL
+//     est défini — c'est le mode de production sur l'infra Bangui ;
+//   - sinon dans un fichier `pnddrr.json` (développement local, inchangé).
+// La logique de fusion multi-postes plus haut ne dépend pas du backend.
+
+const DB_URL = process.env.DATABASE_URL || "";
+
 function dataDir(): string {
   return process.env.DATA_DIR || path.join(process.cwd(), "data");
 }
 
 function dbPath(): string {
   return path.join(dataDir(), "pnddrr.json");
+}
+
+let pool: Pool | null = null;
+let schemaReady: Promise<void> | null = null;
+
+function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({ connectionString: DB_URL, max: 4 });
+  }
+  return pool;
+}
+
+/** Crée la table si absente (idempotent). Doit correspondre à db/schema.sql. */
+async function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = getPool()
+      .query(
+        `CREATE TABLE IF NOT EXISTS registry (
+           id         smallint    PRIMARY KEY DEFAULT 1,
+           data       jsonb       NOT NULL,
+           updated_at timestamptz NOT NULL DEFAULT now(),
+           CONSTRAINT registry_singleton CHECK (id = 1)
+         )`
+      )
+      .then(() => undefined)
+      .catch((e) => {
+        schemaReady = null;
+        throw e;
+      });
+  }
+  return schemaReady;
+}
+
+/** Lit le registre brut depuis le backend, ou null s'il n'existe pas encore. */
+async function backendRead(): Promise<PnddrrDb | null> {
+  if (DB_URL) {
+    await ensureSchema();
+    const r = await getPool().query<{ data: PnddrrDb }>(
+      "SELECT data FROM registry WHERE id = 1"
+    );
+    return r.rows[0]?.data ?? null;
+  }
+  try {
+    const raw = await readFile(dbPath(), "utf8");
+    return JSON.parse(raw) as PnddrrDb;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+}
+
+/** Écrit le registre complet dans le backend (remplacement atomique). */
+async function backendWrite(db: PnddrrDb): Promise<void> {
+  if (DB_URL) {
+    await ensureSchema();
+    await getPool().query(
+      `INSERT INTO registry (id, data, updated_at) VALUES (1, $1::jsonb, now())
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [JSON.stringify(db)]
+    );
+    return;
+  }
+  await mkdir(dataDir(), { recursive: true });
+  const dest = dbPath();
+  const tmp = dest + "." + newId() + ".tmp";
+  await writeFile(tmp, JSON.stringify(db), "utf8");
+  await rename(tmp, dest);
 }
 
 let writeChain: Promise<void> = Promise.resolve();
@@ -355,37 +432,28 @@ function emptyDb(adminPassword: string): PnddrrDb {
 
 export async function readDb(): Promise<PnddrrDb> {
   if (cachedDb) return cachedDb;
-  await mkdir(dataDir(), { recursive: true });
-  try {
-    const raw = await readFile(dbPath(), "utf8");
-    const db = JSON.parse(raw) as PnddrrDb;
-    if (!Array.isArray(db.combattants) || !Array.isArray(db.users)) {
+  const stored = await backendRead();
+  if (stored) {
+    if (!Array.isArray(stored.combattants) || !Array.isArray(stored.users)) {
       throw new Error("Registre invalide (combattants/users manquants)");
     }
-    cachedDb = sanitizeDb(db);
+    cachedDb = sanitizeDb(stored);
     return cachedDb;
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    if (err.code !== "ENOENT") throw e;
-    const admin =
-      process.env.ADMIN_PASSWORD ||
-      (process.env.NODE_ENV === "production" ? "" : "admin2026");
-    if (!admin) {
-      throw new Error("ADMIN_PASSWORD requis pour créer le registre initial");
-    }
-    const db = emptyDb(admin);
-    await atomicWrite(db);
-    return db;
   }
+  const admin =
+    process.env.ADMIN_PASSWORD ||
+    (process.env.NODE_ENV === "production" ? "" : "admin2026");
+  if (!admin) {
+    throw new Error("ADMIN_PASSWORD requis pour créer le registre initial");
+  }
+  const db = emptyDb(admin);
+  await atomicWrite(db);
+  return db;
 }
 
 async function atomicWrite(db: PnddrrDb): Promise<void> {
   sanitizeDb(db);
-  await mkdir(dataDir(), { recursive: true });
-  const dest = dbPath();
-  const tmp = dest + "." + newId() + ".tmp";
-  await writeFile(tmp, JSON.stringify(db), "utf8");
-  await rename(tmp, dest);
+  await backendWrite(db);
   cachedDb = db;
 }
 
