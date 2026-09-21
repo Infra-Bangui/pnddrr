@@ -62,7 +62,7 @@ var DB = {
   groupes:GROUPES,
   users:[
     {id:"u1",login:"admin",pass:"admin2026",nom:"Administrateur système",role:"admin",actif:true},
-    {id:"u2",login:"agent",pass:"agent2026",nom:"Agent DDR — Bangui",role:"agent",actif:true},
+    {id:"u2",login:"agent",pass:"agent2026",nom:"Agent DDR — Bangui",role:"agent",actif:true,region:"Bas-Oubangui",prefecture:"Bangui"},
     {id:"u3",login:"suivi",pass:"suivi2026",nom:"Chargé de suivi & évaluation",role:"suivi",actif:true}
   ],
   combattants:[],
@@ -92,6 +92,28 @@ const ROLE_PERMS = {
 function userPerms(u){ return u.role==="admin"?Object.keys(PERMS):(u.perms||ROLE_PERMS[u.role]||[]); }
 function hasPerm(p){ return !!CUR && userPerms(CUR).includes(p); }
 const $ = id => document.getElementById(id);
+function regionLabel(r){
+  if(!r||!REGIONS[r]) return "";
+  return REGIONS[r].num+". "+r+(r==="Bas-Oubangui"?" (Bangui)":"");
+}
+function regionAgent(u){ u=u||CUR; return (u&&u.region&&REGIONS[u.region])?u.region:""; }
+function userZone(u){
+  u=u||CUR; if(!u) return "";
+  const r=regionAgent(u);
+  if(u.prefecture&&r) return r+" · "+u.prefecture;
+  if(u.prefecture) return u.prefecture;
+  return r;
+}
+function regionVerrouillee(){ return !!(CUR && CUR.role!=="admin"); }
+function updUserBox(){
+  if(!CUR) return;
+  if($("uName")) $("uName").textContent=CUR.nom;
+  if($("uRole")) $("uRole").textContent=ROLES[CUR.role]||CUR.role;
+  const z=$("uZone"); if(!z) return;
+  const t=userZone(CUR);
+  z.textContent=t?"Zone : "+t:(CUR.role==="admin"?"":"Zone non paramétrée — à lier dans Comptes");
+  z.style.display=z.textContent?"block":"none";
+}
 const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmtD = d => { if(!d) return "—"; const [a,m,j]=d.split("-"); return `${j}/${m}/${a}`; };
 const today = () => new Date().toISOString().slice(0,10);
@@ -310,13 +332,14 @@ function applyServerDb(db, opts){
     const u=DB.users.find(x=>x.login===login&&x.actif);
     if(u) CUR=u;
   }
+  if(typeof updUserBox==="function"&&CUR) updUserBox();
   if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
   return true;
 }
 function enterSession(u, opts){
   CUR=u; $("loginErr").style.display="none";
   $("loginScreen").style.display="none"; $("app").classList.add("on");
-  $("uName").textContent=u.nom; $("uRole").textContent=ROLES[u.role];
+  updUserBox();
   $("todayLbl").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
   if(!(opts&&opts.resume)) log("Connexion",`Ouverture de session (${ROLES[u.role]})`);
   buildNav(); updNetBadge(); go("dashboard");
@@ -402,42 +425,49 @@ if(typeof window!=="undefined"){
 
 
 /* module: shell/nav.js — PNDDRR engine (classic globals) */
-/* ---------- Navigation ---------- */
+/* ---------- Navigation — 4 rubriques validées (opération, prise en charge, tableau de bord, administration) ---------- */
 const NAV = [
-  {grp:"Pilotage"},
-  {id:"dashboard", lbl:"Tableau de bord", ic:"◫", roles:["admin","agent","suivi","superviseur"]},
-  {id:"stats", lbl:"Statistiques", ic:"◔", roles:["admin","agent","suivi","superviseur"]},
-  {grp:"1 · Désarmement"},
-  {id:"nouveau", lbl:"Nouvel enregistrement", ic:"✚", perm:"enregistrer"},
-  {id:"registre", lbl:"Registre des ex-combattants", ic:"☰", roles:["admin","agent","suivi","superviseur"]},
-  {id:"armes", lbl:"Registre des armes", ic:"⌖", roles:["admin","agent","suivi","superviseur"]},
-  {id:"docs", lbl:"Cartes & attestations", ic:"▤", roles:["admin","agent","suivi","superviseur"]},
-  {grp:"2 · Réintégration"},
-  {id:"reintegration", lbl:"Suivi des réintégrations", ic:"⇄", roles:["admin","agent","suivi","superviseur"]},
-  {id:"jalons", lbl:"Formation & intégration", ic:"✓", roles:["admin","agent","suivi","superviseur"]},
-  {grp:"3 · Cartographie"},
-  {id:"carto", lbl:"Carte des zones de désarmement", ic:"◉", roles:["admin","agent","suivi","superviseur"]},
+  {grp:"Opération"},
+  {id:"nouveau", lbl:"Enregistrement", perm:"enregistrer"},
+  {id:"aptitude", lbl:"Aptitude", perm:"enregistrer"},
+  {id:"medecine", lbl:"Médecine", perm:"enregistrer"},
+  {id:"kits", lbl:"Distribution de kits", perm:"enregistrer"},
+  {grp:"Prise en charge"},
+  {id:"registre", lbl:"Registre des ex-combattants", roles:["admin","agent","suivi","superviseur"]},
+  {id:"armes", lbl:"Registre des armes", roles:["admin","agent","suivi","superviseur"]},
+  {id:"docs", lbl:"Cartes & attestations", roles:["admin","agent","suivi","superviseur"]},
+  {id:"reintegration", lbl:"Suivi des réintégrations", roles:["admin","agent","suivi","superviseur"]},
+  {id:"jalons", lbl:"Formation & intégration", roles:["admin","agent","suivi","superviseur"]},
+  {grp:"Tableau de bord"},
+  {id:"dashboard", lbl:"Récapitulatif des tours", roles:["admin","agent","suivi","superviseur"]},
+  {id:"stats", lbl:"Statistiques", roles:["admin","agent","suivi","superviseur"]},
+  {id:"carto", lbl:"Carte des zones", roles:["admin","agent","suivi","superviseur"]},
   {grp:"Administration"},
-  {id:"parametres", lbl:"Paramètres", ic:"⚙", roles:["admin","agent","suivi","superviseur"]}
+  {id:"parametres", lbl:"Paramètres", roles:["admin","agent","suivi","superviseur"]}
 ];
 /* Outils regroupés dans la page Paramètres */
 const OUTILS = [
-  {id:"recherche", lbl:"Recherche", ic:"⌕", roles:["admin","agent","suivi","superviseur"]},
-  {id:"import", lbl:"Importer", ic:"⇪", perm:"importer"},
-  {id:"referentiels", lbl:"Référentiels", ic:"⚑", perm:"referentiels"},
-  {id:"config", lbl:"Configuration", ic:"⚙", roles:["admin"]},
-  {id:"comptes", lbl:"Comptes", ic:"♟", roles:["admin"]},
-  {id:"journal", lbl:"Journal", ic:"✎", roles:["admin"]},
-  {id:"sauvegarde", lbl:"Sauvegarde", ic:"⇆", roles:["admin","agent","suivi","superviseur"]}
+  {id:"recherche", lbl:"Recherche", roles:["admin","agent","suivi","superviseur"]},
+  {id:"import", lbl:"Importer", perm:"importer"},
+  {id:"referentiels", lbl:"Référentiels", perm:"referentiels"},
+  {id:"config", lbl:"Configuration", roles:["admin"]},
+  {id:"comptes", lbl:"Comptes", roles:["admin"]},
+  {id:"journal", lbl:"Journal", roles:["admin"]},
+  {id:"sauvegarde", lbl:"Sauvegarde", roles:["admin","agent","suivi","superviseur"]}
 ];
 function navAllowed(it){ return it.perm?hasPerm(it.perm):it.roles.includes(CUR.role); }
 function buildNav(){
-  let h="";
-  for(const it of NAV){
-    if(it.grp){ h+=`<div class="grp">${it.grp}</div>`; continue; }
-    if(!navAllowed(it)) continue;
-    h+=`<a href="#" data-v="${it.id}" onclick="go('${it.id}');return false;">${it.lbl}</a>`;
+  let h="", pending=null, buf=[];
+  function flush(){
+    if(pending&&buf.length) h+=`<div class="grp">${pending}</div>`+buf.join("");
+    pending=null; buf=[];
   }
+  for(const it of NAV){
+    if(it.grp){ flush(); pending=it.grp; continue; }
+    if(!navAllowed(it)) continue;
+    buf.push(`<a href="#" data-v="${it.id}" onclick="go('${it.id}');return false;">${it.lbl}</a>`);
+  }
+  flush();
   $("mainNav").innerHTML = h;
   $("bannerRCA").innerHTML = `<div class="b-emb">${ARM_SVG}</div>
     <div class="b-tx">
@@ -457,13 +487,40 @@ function go(v, arg){
   VIEW=v;
   const OUTIL_IDS=OUTILS.map(o=>o.id);
   document.querySelectorAll("#mainNav a").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(a.dataset.v==="parametres"&&OUTIL_IDS.includes(v))));
-  const titles={dashboard:"Tableau de bord",stats:"Statistiques du programme",nouveau:"Désarmement — nouvel enregistrement",registre:"Désarmement — registre des ex-combattants",armes:"Désarmement — registre des armes",docs:"Cartes de démobilisé & attestations de désarmement",import:"Désarmement — importation de données",referentiels:"Référentiels — groupes armés",reintegration:"Réintégration — suivi des parcours",jalons:"Réintégration — formation & intégration à la vie militaire ou civile",carto:"Cartographie des zones de désarmement",recherche:"Recherche multicritère",comptes:"Gestion des comptes utilisateurs",journal:"Journal des opérations",sauvegarde:"Sauvegarde & synchronisation",config:"Configuration du programme",parametres:"Paramètres",fiche:"Dossier individuel"};
+  const titles={
+    dashboard:"Tableau de bord — récapitulatif des tours",
+    stats:"Statistiques du programme",
+    nouveau:"Opération — enregistrement",
+    aptitude:"Opération — aptitude",
+    medecine:"Opération — médecine",
+    kits:"Opération — distribution de kits",
+    registre:"Prise en charge — registre des ex-combattants",
+    armes:"Prise en charge — registre des armes",
+    docs:"Prise en charge — cartes & attestations",
+    reintegration:"Prise en charge — suivi des réintégrations",
+    jalons:"Prise en charge — formation & intégration",
+    import:"Administration — importation de données",
+    referentiels:"Administration — groupes armés",
+    carto:"Tableau de bord — carte des zones de désarmement",
+    recherche:"Recherche multicritère",
+    comptes:"Gestion des comptes utilisateurs",
+    journal:"Journal des opérations",
+    sauvegarde:"Sauvegarde & synchronisation",
+    config:"Configuration du programme",
+    parametres:"Administration — paramètres",
+    fiche:"Dossier individuel"
+  };
   $("pageTitle").textContent = titles[v]||"";
-  const R={dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rDocs,import:()=>rImport(arg),referentiels:rReferentiels,reintegration:rReint,jalons:rJalons,carto:rCarto,recherche:rRecherche,comptes:rComptes,journal:rJournal,sauvegarde:rSauvegarde,config:rConfig,parametres:rParametres,fiche:()=>rFiche(arg)};
+  const R={
+    dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rDocs,
+    aptitude:()=>rOperationAttente("aptitude"),medecine:()=>rOperationAttente("medecine"),kits:()=>rOperationAttente("kits"),
+    import:()=>rImport(arg),referentiels:rReferentiels,reintegration:rReint,jalons:rJalons,carto:rCarto,
+    recherche:rRecherche,comptes:rComptes,journal:rJournal,sauvegarde:rSauvegarde,config:rConfig,parametres:rParametres,
+    fiche:()=>rFiche(arg)
+  };
   (R[v]||rDash)();
   $("view").scrollTop=0;
 }
-
 
 /* module: shell/modal.js — PNDDRR engine (classic globals) */
 /* ---------- Modale ---------- */
@@ -542,6 +599,7 @@ function rDash(){
   const demoN=DB.combattants.filter(x=>x.agent==="Poste de démonstration").length;
   $("view").innerHTML = `
   ${rappelSauvegarde()}
+  ${regionVerrouillee()&&!regionAgent()?`<div class="small" style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:9px 13px;margin-bottom:13px"><b style="color:var(--danger)">Zone non paramétrée.</b> Votre région de travail doit être liée à votre compte (Paramètres → Comptes). Sans cette zone, l'enregistrement est bloqué pour éviter une saisie de région erronée.</div>`:""}
   ${demoN?`<div class="small" style="background:#FFF9E6;border:1px solid #E8D48A;border-radius:8px;padding:9px 13px;margin-bottom:13px">▸ <b>Mode simulation :</b> ${demoN} dossier(s) fictifs de démonstration sont chargés pour découvrir le programme. Pour repartir de zéro : ${CUR.role==="admin"?`onglet Sauvegarde → « Effacer les données locales »`:`demandez à l'administrateur d'effacer les données locales`}.</div>`:""}
   <div class="toolbar">
     <div class="field"><label>Région</label><select onchange="dashSet('reg',this.value)"><option value="">Toutes</option>${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${DASH_F.reg===r?"selected":""}>${v.num}. ${esc(r)}</option>`).join("")}</select></div>
@@ -589,7 +647,12 @@ function rDash(){
 function selOpts(arr,sel){ return arr.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join(""); }
 function rNouveau(edit){
   const c = edit ? DB.combattants.find(x=>x.id===edit) : null;
+  const lock=regionVerrouillee();
+  const regProfil=regionAgent();
+  const sansZone=lock&&!regProfil;
+  const regInit=regProfil||(c?regionOf(c.prefecture):"")||Object.keys(REGIONS)[0];
   $("view").innerHTML = `
+  ${sansZone?`<div class="panel" style="border-color:#E3B4B4"><div class="pb"><b style="color:var(--danger)">Zone non paramétrée.</b> La région d'enregistrement est liée au profil de l'agent. Demandez à l'administrateur de la renseigner dans Paramètres → Comptes (mutation = changement de zone dans le compte).</div></div>`:""}
   <div class="panel"><div class="ph"><h3>${c?`Modification du dossier ${c.num}`:"Fiche d'enregistrement individuel"}</h3></div><div class="pb">
   <form id="fEnr" onsubmit="return false">
     <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:14px">
@@ -597,6 +660,7 @@ function rNouveau(edit){
         <div class="photo-box" id="phBox">${c&&c.photo?`<img src="${c.photo}">`:"Photo<br>d'identité"}</div>
         <input type="file" id="phFile" accept="image/*" capture="environment" style="margin-top:7px;font-size:11.5px;border:none;padding:0">
         <div class="small muted" style="margin-top:3px">La photo est automatiquement compressée (≈300 px) pour préserver la capacité de stockage.</div>
+        <div id="fpBox" class="fp-box" style="margin-top:12px"></div>
       </div>
       <div style="flex:1">
         <div class="grid3">
@@ -613,8 +677,9 @@ function rNouveau(edit){
       </div>
     </div>
     <h3 style="color:var(--teal-dark);margin:8px 0 10px;font-size:13.5px;text-transform:uppercase">Localisation</h3>
+    <p class="small muted" style="margin:-4px 0 10px">${lock?"Région issue du profil agent — elle ne se choisit pas à l'enregistrement. En cas de mutation, l'administrateur change la zone dans Paramètres → Comptes.":"La région par défaut peut être renseignée sur chaque compte agent pour éviter les erreurs de saisie."}</p>
     <div class="grid3">
-      <div class="field"><label>Région</label><select id="e_region" onchange="fillPref()">${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${c&&regionOf(c.prefecture)===r?"selected":""}>${v.num}. ${esc(r)}${r==="Bas-Oubangui"?" (Bangui)":""}</option>`).join("")}</select></div>
+      <div class="field${lock?" locked":""}"><label>Région</label><select id="e_region" ${lock||sansZone?"disabled":""} onchange="fillPref()">${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${r===regInit?"selected":""}>${v.num}. ${esc(r)}${r==="Bas-Oubangui"?" (Bangui)":""}</option>`).join("")}</select></div>
       <div class="field"><label>Préfecture *</label><select id="e_pref" onchange="fillLoc()"></select></div>
       <div class="field"><label>Sous-préfecture</label><select id="e_sp"></select><input id="e_sp_libre" placeholder="Préciser la sous-préfecture" style="display:none;margin-top:5px"></div>
       <div class="field"><label>Commune</label><select id="e_commune"></select><input id="e_commune_libre" placeholder="Préciser la commune" style="display:none;margin-top:5px"></div>
@@ -660,8 +725,11 @@ function rNouveau(edit){
   };
   window.fillPref = function(){
     const reg=$("e_region").value;
-    const list=REGIONS[reg].prefs;
-    const cur=(c&&list.includes(c.prefecture))?c.prefecture:list[0];
+    const list=(REGIONS[reg]&&REGIONS[reg].prefs)||[];
+    if(!list.length){ $("e_pref").innerHTML=""; return; }
+    const cur=(c&&list.includes(c.prefecture))?c.prefecture
+      :(!c&&CUR&&CUR.prefecture&&list.includes(CUR.prefecture))?CUR.prefecture
+      :list[0];
     $("e_pref").innerHTML=list.map(p=>`<option ${p===cur?"selected":""}>${esc(p)}</option>`).join("");
     fillLoc();
   };
@@ -682,6 +750,7 @@ function rNouveau(edit){
     majVague();
   };
   fillPref();
+  if(typeof uiEmpreinte==="function") uiEmpreinte("fpBox", c&&c.empreinte);
   const locVal=(sel,libre)=>{ const v=$(sel).value; return v==="__autre"?$(libre).value.trim():v; };
   let photoData = c?c.photo||null:null;
   $("phFile").addEventListener("change",e=>{
@@ -706,14 +775,19 @@ function rNouveau(edit){
     r.readAsDataURL(f);
   });
   window.submitEnr = function(){
+    if(sansZone){ toast("Impossible d'enregistrer : votre zone géographique n'est pas paramétrée."); return; }
     if(!$("e_nom").value.trim()||!$("e_prenom").value.trim()){ toast("Le nom et le prénom sont obligatoires."); return; }
     if(!$("e_vague").value.trim()){ toast("La vague d'enregistrement est obligatoire — elle permet le suivi jusqu'à la formation."); return; }
+    const prefVal=$("e_pref").value;
+    if(lock&&regProfil&&regionOf(prefVal)!==regProfil){ toast("La préfecture doit appartenir à votre région de travail ("+regionLabel(regProfil)+")."); return; }
+    const fpBox=$("fpBox");
     const d={
       nom:$("e_nom").value.trim().toUpperCase(), prenom:$("e_prenom").value.trim(), alias:$("e_alias").value.trim(),
       sexe:$("e_sexe").value, dn:$("e_dn").value, ln:$("e_ln").value.trim(), nat:$("e_nat").value.trim(), tel:$("e_tel").value.trim(),
-      fam:$("e_fam").value, prefecture:$("e_pref").value, sousPref:locVal("e_sp","e_sp_libre"), commune:locVal("e_commune","e_commune_libre"), site:$("e_site").value.trim(), vague:$("e_vague").value.trim(),
+      fam:$("e_fam").value, prefecture:prefVal, sousPref:locVal("e_sp","e_sp_libre"), commune:locVal("e_commune","e_commune_libre"), site:$("e_site").value.trim(), vague:$("e_vague").value.trim(),
       groupe:$("e_grp").value, grade:$("e_grade").value.trim(), annees:$("e_annees").value, zone:$("e_zone").value.trim(),
-      souhait:$("e_souhait").value, instr:$("e_instr").value, obs:$("e_obs").value.trim(), photo:photoData
+      souhait:$("e_souhait").value, instr:$("e_instr").value, obs:$("e_obs").value.trim(), photo:photoData,
+      empreinte:fpBox&&typeof fpBox.getEmpreinte==="function"?fpBox.getEmpreinte():(c&&c.empreinte)||null
     };
     if(c){ Object.assign(c,d); log("Modification dossier",`${c.num} — ${c.nom} ${c.prenom}`); toast("Dossier mis à jour."); go("fiche",c.id); }
     else{
@@ -727,6 +801,91 @@ function rNouveau(edit){
   $("fEnr").addEventListener("submit",e=>{ e.preventDefault(); submitEnr(); });
 }
 
+
+/* module: operations/attente.js — PNDDRR engine (classic globals) */
+/* Aptitude, médecine et kits : structure validée, contenu en attente des documents de référence. */
+const OPERATION_ATTENTE = {
+  aptitude:{
+    titre:"Aptitude",
+    intro:"Ce module accueillera le contrôle d'aptitude des personnes enregistrées (critères médicaux et opérationnels).",
+    docs:"grille d'aptitude, critères d'admission et circuit de validation"
+  },
+  medecine:{
+    titre:"Médecine",
+    intro:"Ce module accueillera le suivi médical lié aux opérations de désarmement (consultations, soins, orientation sanitaire).",
+    docs:"protocole médical, fiches de consultation et listes de médicaments"
+  },
+  kits:{
+    titre:"Distribution de kits",
+    intro:"Ce module accueillera la remise des kits aux personnes prises en charge (composition, stocks, accusés de réception).",
+    docs:"nomenclature des kits, seuils de stock et bordereaux de distribution"
+  }
+};
+function rOperationAttente(kind){
+  const m=OPERATION_ATTENTE[kind]||OPERATION_ATTENTE.aptitude;
+  $("view").innerHTML = `
+  <div class="panel"><div class="ph"><h3>${esc(m.titre)}</h3><span class="muted small">Opération</span></div>
+  <div class="pb">
+    <p>${esc(m.intro)}</p>
+    <p class="small muted" style="margin-top:10px">Le contenu détaillé sera saisi dès réception des documents de référence (${esc(m.docs)}). La rubrique est déjà en place dans le menu pour ne pas retarder la structuration validée.</p>
+  </div></div>`;
+}
+
+/* module: biometrie/lecteur.js — PNDDRR engine (classic globals) */
+/* Lecteur d'empreintes : le SDK fourni par la direction s'expose via window.PnddrrLecteur
+   (fichier optionnel /engine/lecteur-vendor.js). Sans ce module, la capture signale l'absence du lecteur. */
+var _lecteurVendorTried=false;
+function chargerLecteurVendor(done){
+  if(window.PnddrrLecteur||_lecteurVendorTried){ if(done) done(); return; }
+  _lecteurVendorTried=true;
+  const s=document.createElement("script");
+  s.src="/engine/lecteur-vendor.js";
+  s.dataset.pnddrrLecteur="1";
+  s.onload=()=>{ if(done) done(); };
+  s.onerror=()=>{ if(done) done(); };
+  document.body.appendChild(s);
+}
+function lecteurDispo(){
+  return !!(window.PnddrrLecteur && typeof window.PnddrrLecteur.capture==="function");
+}
+function empreinteResume(fp){
+  if(!fp) return "";
+  if(typeof fp==="string") return fp.slice(0,24);
+  return fp.id||fp.template&&String(fp.template).slice(0,24)||"capturée";
+}
+function captureEmpreinte(onDone){
+  function run(){
+    if(!lecteurDispo()){
+      toast("Lecteur d'empreintes non détecté. Installez le module fourni par la direction, puis rechargez la page.");
+      if(onDone) onDone(null);
+      return;
+    }
+    Promise.resolve(window.PnddrrLecteur.capture())
+      .then(tpl=>{
+        if(!tpl){ toast("Aucune empreinte n'a été lue."); if(onDone) onDone(null); return; }
+        const fp=typeof tpl==="object"?Object.assign({capturedAt:new Date().toISOString()}, tpl):{template:String(tpl),capturedAt:new Date().toISOString()};
+        toast("Empreinte capturée.");
+        if(onDone) onDone(fp);
+      })
+      .catch(()=>{
+        toast("Échec de lecture. Vérifiez le lecteur et réessayez.");
+        if(onDone) onDone(null);
+      });
+  }
+  chargerLecteurVendor(run);
+}
+function uiEmpreinte(boxId, initial){
+  const box=$(boxId); if(!box) return;
+  function paint(fp){
+    box._fp=fp||null;
+    box.innerHTML = fp
+      ? `<div class="fp-ok">Empreinte enregistrée</div><div class="small muted">${esc(empreinteResume(fp))}</div><button type="button" class="btn sm sec" style="margin-top:7px" onclick="event.preventDefault();captureEmpreinte(p=>{if(p) paint(p);})">Reprendre</button>`
+      : `<div class="fp-empty">Empreinte<br>digitale</div><button type="button" class="btn sm sec" style="margin-top:7px" onclick="event.preventDefault();captureEmpreinte(p=>{if(p) paint(p);})">Capturer</button>`;
+  }
+  paint(initial||null);
+  box.getEmpreinte=()=>box._fp||null;
+}
+chargerLecteurVendor();
 
 /* module: combattants/registre.js — PNDDRR engine (classic globals) */
 /* ================= REGISTRE ================= */
@@ -1600,12 +1759,18 @@ function runRecherche(){
 
 /* module: admin/comptes.js — PNDDRR engine (classic globals) */
 /* ================= COMPTES ================= */
+function regionOpts(sel){
+  return `<option value="">— Toutes / non renseignée —</option>`
+    +Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${sel===r?"selected":""}>${v.num}. ${esc(r)}${r==="Bas-Oubangui"?" (Bangui)":""}</option>`).join("");
+}
 function rComptes(){
   $("view").innerHTML = `
   ${["admin2026","agent2026","suivi2026"].some(p=>DB.users.some(u=>u.actif&&u.pass===hashPwd(p)))?`<div class="small" style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:10px 13px;margin-bottom:13px"><b style="color:var(--danger)">⚠ Sécurité :</b> des comptes utilisent encore les mots de passe de démonstration (admin2026, agent2026, suivi2026). Changez-les avant toute mise en service réelle — via « Modifier » ci-dessous ou « Mon mot de passe » dans la barre latérale.</div>`:""}
+  <p class="small muted" style="margin-bottom:12px">La zone géographique d'un agent est liée à son profil. Elle s'applique automatiquement à l'enregistrement : l'agent ne choisit plus la région. En cas de mutation, modifier la zone ici.</p>
   <div class="toolbar"><button class="btn ghost" onclick="go('parametres')">← Retour aux paramètres</button><div style="flex:1"></div><button class="btn" onclick="mCompte()">+ Nouveau compte</button></div>
-  <div class="panel"><div class="pb nopad"><table><thead><tr><th>Identifiant</th><th>Nom</th><th>Profil</th><th>Autorisations</th><th>État</th><th>Actions</th></tr></thead><tbody>${
+  <div class="panel"><div class="ph"><h3>Comptes</h3></div><div class="pb nopad"><table><thead><tr><th>Identifiant</th><th>Nom</th><th>Profil</th><th>Zone</th><th>Autorisations</th><th>État</th><th>Actions</th></tr></thead><tbody>${
     DB.users.map(u=>`<tr><td><b>${esc(u.login)}</b></td><td>${esc(u.nom)}</td><td>${ROLES[u.role]}</td>
+    <td class="small">${userZone(u)?esc(userZone(u)):'<span class="muted">Non paramétrée</span>'}</td>
     <td class="small">${u.role==="admin"?'<span class="tag">Toutes</span>':userPerms(u).length?userPerms(u).map(p=>`<span class="tag" title="${esc(PERMS[p])}">${p}</span>`).join(" "):'<span class="muted">Aucune</span>'}${u.perms?' <span class="muted small">(personnalisées)</span>':""}</td>
     <td>${u.actif?'<span class="badge st-reintegre">Actif</span>':'<span class="badge st-abandon">Désactivé</span>'}</td>
     <td class="actions-cell"><button class="btn sm sec" onclick="mCompte('${u.id}')">Modifier</button>${u.login!==CUR.login?`<button class="btn sm ghost" onclick="toggleCompte('${u.id}')">${u.actif?"Désactiver":"Réactiver"}</button>`:""}</td></tr>`).join("")
@@ -1621,6 +1786,13 @@ function presetPerms(){
   $("c_permAdmin").style.display=role==="admin"?"block":"none";
   document.querySelectorAll(".c_perm").forEach(cb=>cb.checked=ROLE_PERMS[role].includes(cb.value));
 }
+function fillComptePref(){
+  const reg=$("c_region").value;
+  const list=(REGIONS[reg]&&REGIONS[reg].prefs)||[];
+  const cur=$("c_pref").dataset.cur||"";
+  $("c_pref").innerHTML='<option value="">— Non précisée —</option>'+list.map(p=>`<option ${p===cur?"selected":""}>${esc(p)}</option>`).join("");
+  $("c_prefHint").style.display=reg?"":"none";
+}
 function mCompte(id){
   const u=id?DB.users.find(x=>x.id===id):null;
   openModal(u?"Modifier le compte":"Nouveau compte", `
@@ -1628,33 +1800,46 @@ function mCompte(id){
     <div class="field"><label>Identifiant</label><input id="c_login" value="${u?esc(u.login):""}" ${u?"disabled":""}></div>
     <div class="field"><label>Nom complet</label><input id="c_nom" value="${u?esc(u.nom):""}"></div>
     <div class="field"><label>Profil</label><select id="c_role" onchange="presetPerms()">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u&&u.role===k?"selected":""}>${v}</option>`).join("")}</select></div>
-    <div class="field"><label>${u?"Nouveau mot de passe (laisser vide pour conserver)":"Mot de passe"}</label><input id="c_pass" type="password"></div></div>
+    <div class="field"><label>${u?"Nouveau mot de passe (laisser vide pour conserver)":"Mot de passe"}</label><input id="c_pass" type="password"></div>
+    <div class="field"><label>Région de travail</label><select id="c_region" onchange="fillComptePref()">${regionOpts(u?u.region:"")}</select>
+      <div class="small muted" style="margin-top:3px">Liée au profil : l'enregistrement utilise cette région, sans choix manuel par l'agent.</div></div>
+    <div class="field"><label>Préfecture (optionnelle)</label><select id="c_pref" data-cur="${u&&u.prefecture?esc(u.prefecture):""}"></select>
+      <div id="c_prefHint" class="small muted" style="margin-top:3px;display:none">Préfecture proposée par défaut dans le formulaire. L'agent peut encore choisir une autre préfecture de sa région.</div></div>
+    </div>
     <div id="c_permBox" style="${(u?u.role:"agent")==="admin"?"display:none":""}">
       <label style="margin-bottom:8px">Autorisations du compte</label>
       <div class="small muted" style="margin-bottom:8px">Le profil pré-remplit les autorisations ; l'administrateur peut ensuite les ajuster individuellement.</div>
       <div style="border:1px solid var(--line);border-radius:8px;padding:12px;columns:2">${permBoxes(u)}</div>
     </div>
-    <div id="c_permAdmin" class="small muted" style="${(u?u.role:"agent")==="admin"?"":"display:none"}">Le profil Administrateur dispose de toutes les autorisations, y compris la gestion des comptes et le journal.</div>`,
+    <div id="c_permAdmin" class="small muted" style="${(u?u.role:"agent")==="admin"?"":"display:none"}">Le profil Administrateur dispose de toutes les autorisations, y compris la gestion des comptes et le journal. La région est facultative (toutes les zones).</div>`,
     `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveCompte('${id||""}')">Enregistrer</button>`);
+  fillComptePref();
 }
 function saveCompte(id){
   if(CUR.role!=="admin"){ toast("Réservé à l'administrateur."); return; }
   const role=$("c_role").value;
   const perms=role==="admin"?null:[...document.querySelectorAll(".c_perm:checked")].map(cb=>cb.value);
+  const region=$("c_region").value||"";
+  const prefecture=region?($("c_pref").value||""):"";
   if(id){
     const u=DB.users.find(x=>x.id===id);
     u.nom=$("c_nom").value.trim()||u.nom; u.role=role; u.perms=perms||undefined;
+    u.region=region||undefined; u.prefecture=prefecture||undefined;
     if(role==="admin") delete u.perms;
     if($("c_pass").value){ u.pass=hashPwd($("c_pass").value); u.passUpdated=true; }
-    log("Compte modifié",`${u.login} — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);
+    if(CUR&&CUR.id===u.id){ CUR=u; updUserBox(); }
+    log("Compte modifié",`${u.login} — zone : ${userZone(u)||"non paramétrée"} — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);
   } else {
     const login=$("c_login").value.trim();
     if(!login||!$("c_pass").value){ toast("Identifiant et mot de passe requis."); return; }
     if(DB.users.some(x=>x.login===login)){ toast("Cet identifiant existe déjà."); return; }
+    if(role==="agent"&&!region){ toast("Renseignez la région de travail de l'agent."); return; }
     const nu={id:"u"+Date.now(),login,pass:hashPwd($("c_pass").value),nom:$("c_nom").value.trim()||login,role,actif:true,passUpdated:true};
     if(role!=="admin") nu.perms=perms;
+    if(region) nu.region=region;
+    if(prefecture) nu.prefecture=prefecture;
     DB.users.push(nu);
-    log("Compte créé",`${login} (${ROLES[role]}) — autorisations : ${role==="admin"?"toutes":perms.join(", ")||"aucune"}`);
+    log("Compte créé",`${login} (${ROLES[role]}) — zone : ${userZone(nu)||"non paramétrée"}`);
   }
   closeModal(); toast("Compte enregistré."); rComptes();
 }
@@ -1662,7 +1847,6 @@ function toggleCompte(id){
   const u=DB.users.find(x=>x.id===id); u.actif=!u.actif;
   log(u.actif?"Compte réactivé":"Compte désactivé",u.login); rComptes();
 }
-
 
 /* module: admin/referentiels.js — PNDDRR engine (classic globals) */
 /* ================= RÉFÉRENTIELS — GROUPES ARMÉS ================= */
@@ -1747,7 +1931,7 @@ const OUTIL_DESC={
   import:["Importer des données","Charger des fichiers CSV, Excel, Word ou PDF : dossiers d'ex-combattants et registres d'armes, avec contrôle et synchronisation."],
   referentiels:["Référentiels (groupes armés)","Ajouter, renommer ou supprimer les groupes armés proposés dans les formulaires et les filtres."],
   config:["Configuration du programme","Régler les seuils d'alerte, le verrouillage, la pagination, les documents officiels et les éléments de la carte de démobilisé."],
-  comptes:["Gestion des comptes","Créer les comptes des agents et attribuer leurs autorisations, profil par profil."],
+  comptes:["Gestion des comptes","Créer les comptes, lier chaque agent à sa région de travail, et attribuer les autorisations."],
   journal:["Journal des opérations","Consulter l'historique horodaté de toutes les opérations effectuées dans l'application."],
   sauvegarde:["Sauvegarde & synchronisation","Fonctionnement hors ligne, enregistrement local, échanges JSON entre postes et fusion multi-postes."]
 };
@@ -2027,7 +2211,7 @@ function mergeDB(d){
       ((inc.desarmement&&inc.desarmement.armes)||[]).forEach(a=>{ const k=armeKey(a); if(k) keys.add(k); });
       continue;
     }
-    ["alias","dn","ln","tel","sousPref","commune","site","grade","annees","zone","obs","photo"].forEach(f=>{ if(!ex[f]&&inc[f]) ex[f]=inc[f]; });
+    ["alias","dn","ln","tel","sousPref","commune","site","grade","annees","zone","obs","photo","empreinte"].forEach(f=>{ if(!ex[f]&&inc[f]) ex[f]=inc[f]; });
     if(STATUTS[inc.statut]&&STATUTS[inc.statut].ord>STATUTS[ex.statut].ord) ex.statut=inc.statut;
     if(inc.desarmement){
       if(!ex.desarmement) ex.desarmement={date:inc.desarmement.date,lieu:inc.desarmement.lieu,agent:inc.desarmement.agent,armes:[],munitions:[]};

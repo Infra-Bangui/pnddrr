@@ -135,6 +135,12 @@ header.top .date{font-size:12.5px;color:var(--muted)}
 .kpi.click:hover{box-shadow:0 6px 18px rgba(14,124,123,.22);transform:translateY(-2px)}
 .photo-box{width:110px;height:130px;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#F7FAF9;color:var(--muted);font-size:11px;text-align:center}
 .photo-box img{width:100%;height:100%;object-fit:cover}
+.fp-box{width:110px;text-align:center}
+.fp-box .fp-empty,.fp-box .fp-ok{width:110px;min-height:72px;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;background:#F7FAF9;color:var(--muted);font-size:11px;padding:6px}
+.fp-box .fp-ok{border-style:solid;border-color:var(--teal);color:var(--teal-dark);font-weight:600}
+aside .userbox .zone{color:#8FB0AF;font-size:11px;display:block;margin-top:3px;line-height:1.3}
+.field.locked label{color:var(--muted)}
+select:disabled,input:disabled{background:#F4F6F6;color:var(--ink);cursor:not-allowed}
 .steps{display:flex;gap:0;margin-bottom:18px;flex-wrap:wrap}
 .step{flex:1;min-width:110px;text-align:center;padding:9px 6px;background:#fff;border:1px solid var(--line);font-size:11.5px;color:var(--muted);position:relative}
 .step:first-child{border-radius:8px 0 0 8px}.step:last-child{border-radius:0 8px 8px 0}

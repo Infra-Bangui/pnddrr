@@ -5,7 +5,7 @@ var DB = {
   groupes:GROUPES,
   users:[
     {id:"u1",login:"admin",pass:"admin2026",nom:"Administrateur système",role:"admin",actif:true},
-    {id:"u2",login:"agent",pass:"agent2026",nom:"Agent DDR — Bangui",role:"agent",actif:true},
+    {id:"u2",login:"agent",pass:"agent2026",nom:"Agent DDR — Bangui",role:"agent",actif:true,region:"Bas-Oubangui",prefecture:"Bangui"},
     {id:"u3",login:"suivi",pass:"suivi2026",nom:"Chargé de suivi & évaluation",role:"suivi",actif:true}
   ],
   combattants:[],
@@ -35,6 +35,28 @@ const ROLE_PERMS = {
 function userPerms(u){ return u.role==="admin"?Object.keys(PERMS):(u.perms||ROLE_PERMS[u.role]||[]); }
 function hasPerm(p){ return !!CUR && userPerms(CUR).includes(p); }
 const $ = id => document.getElementById(id);
+function regionLabel(r){
+  if(!r||!REGIONS[r]) return "";
+  return REGIONS[r].num+". "+r+(r==="Bas-Oubangui"?" (Bangui)":"");
+}
+function regionAgent(u){ u=u||CUR; return (u&&u.region&&REGIONS[u.region])?u.region:""; }
+function userZone(u){
+  u=u||CUR; if(!u) return "";
+  const r=regionAgent(u);
+  if(u.prefecture&&r) return r+" · "+u.prefecture;
+  if(u.prefecture) return u.prefecture;
+  return r;
+}
+function regionVerrouillee(){ return !!(CUR && CUR.role!=="admin"); }
+function updUserBox(){
+  if(!CUR) return;
+  if($("uName")) $("uName").textContent=CUR.nom;
+  if($("uRole")) $("uRole").textContent=ROLES[CUR.role]||CUR.role;
+  const z=$("uZone"); if(!z) return;
+  const t=userZone(CUR);
+  z.textContent=t?"Zone : "+t:(CUR.role==="admin"?"":"Zone non paramétrée — à lier dans Comptes");
+  z.style.display=z.textContent?"block":"none";
+}
 const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmtD = d => { if(!d) return "—"; const [a,m,j]=d.split("-"); return `${j}/${m}/${a}`; };
 const today = () => new Date().toISOString().slice(0,10);

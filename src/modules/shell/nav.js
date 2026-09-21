@@ -1,40 +1,47 @@
 /* module: shell/nav.js — PNDDRR engine (classic globals) */
-/* ---------- Navigation ---------- */
+/* ---------- Navigation — 4 rubriques validées (opération, prise en charge, tableau de bord, administration) ---------- */
 const NAV = [
-  {grp:"Pilotage"},
-  {id:"dashboard", lbl:"Tableau de bord", ic:"◫", roles:["admin","agent","suivi","superviseur"]},
-  {id:"stats", lbl:"Statistiques", ic:"◔", roles:["admin","agent","suivi","superviseur"]},
-  {grp:"1 · Désarmement"},
-  {id:"nouveau", lbl:"Nouvel enregistrement", ic:"✚", perm:"enregistrer"},
-  {id:"registre", lbl:"Registre des ex-combattants", ic:"☰", roles:["admin","agent","suivi","superviseur"]},
-  {id:"armes", lbl:"Registre des armes", ic:"⌖", roles:["admin","agent","suivi","superviseur"]},
-  {id:"docs", lbl:"Cartes & attestations", ic:"▤", roles:["admin","agent","suivi","superviseur"]},
-  {grp:"2 · Réintégration"},
-  {id:"reintegration", lbl:"Suivi des réintégrations", ic:"⇄", roles:["admin","agent","suivi","superviseur"]},
-  {id:"jalons", lbl:"Formation & intégration", ic:"✓", roles:["admin","agent","suivi","superviseur"]},
-  {grp:"3 · Cartographie"},
-  {id:"carto", lbl:"Carte des zones de désarmement", ic:"◉", roles:["admin","agent","suivi","superviseur"]},
+  {grp:"Opération"},
+  {id:"nouveau", lbl:"Enregistrement", perm:"enregistrer"},
+  {id:"aptitude", lbl:"Aptitude", perm:"enregistrer"},
+  {id:"medecine", lbl:"Médecine", perm:"enregistrer"},
+  {id:"kits", lbl:"Distribution de kits", perm:"enregistrer"},
+  {grp:"Prise en charge"},
+  {id:"registre", lbl:"Registre des ex-combattants", roles:["admin","agent","suivi","superviseur"]},
+  {id:"armes", lbl:"Registre des armes", roles:["admin","agent","suivi","superviseur"]},
+  {id:"docs", lbl:"Cartes & attestations", roles:["admin","agent","suivi","superviseur"]},
+  {id:"reintegration", lbl:"Suivi des réintégrations", roles:["admin","agent","suivi","superviseur"]},
+  {id:"jalons", lbl:"Formation & intégration", roles:["admin","agent","suivi","superviseur"]},
+  {grp:"Tableau de bord"},
+  {id:"dashboard", lbl:"Récapitulatif des tours", roles:["admin","agent","suivi","superviseur"]},
+  {id:"stats", lbl:"Statistiques", roles:["admin","agent","suivi","superviseur"]},
+  {id:"carto", lbl:"Carte des zones", roles:["admin","agent","suivi","superviseur"]},
   {grp:"Administration"},
-  {id:"parametres", lbl:"Paramètres", ic:"⚙", roles:["admin","agent","suivi","superviseur"]}
+  {id:"parametres", lbl:"Paramètres", roles:["admin","agent","suivi","superviseur"]}
 ];
 /* Outils regroupés dans la page Paramètres */
 const OUTILS = [
-  {id:"recherche", lbl:"Recherche", ic:"⌕", roles:["admin","agent","suivi","superviseur"]},
-  {id:"import", lbl:"Importer", ic:"⇪", perm:"importer"},
-  {id:"referentiels", lbl:"Référentiels", ic:"⚑", perm:"referentiels"},
-  {id:"config", lbl:"Configuration", ic:"⚙", roles:["admin"]},
-  {id:"comptes", lbl:"Comptes", ic:"♟", roles:["admin"]},
-  {id:"journal", lbl:"Journal", ic:"✎", roles:["admin"]},
-  {id:"sauvegarde", lbl:"Sauvegarde", ic:"⇆", roles:["admin","agent","suivi","superviseur"]}
+  {id:"recherche", lbl:"Recherche", roles:["admin","agent","suivi","superviseur"]},
+  {id:"import", lbl:"Importer", perm:"importer"},
+  {id:"referentiels", lbl:"Référentiels", perm:"referentiels"},
+  {id:"config", lbl:"Configuration", roles:["admin"]},
+  {id:"comptes", lbl:"Comptes", roles:["admin"]},
+  {id:"journal", lbl:"Journal", roles:["admin"]},
+  {id:"sauvegarde", lbl:"Sauvegarde", roles:["admin","agent","suivi","superviseur"]}
 ];
 function navAllowed(it){ return it.perm?hasPerm(it.perm):it.roles.includes(CUR.role); }
 function buildNav(){
-  let h="";
-  for(const it of NAV){
-    if(it.grp){ h+=`<div class="grp">${it.grp}</div>`; continue; }
-    if(!navAllowed(it)) continue;
-    h+=`<a href="#" data-v="${it.id}" onclick="go('${it.id}');return false;">${it.lbl}</a>`;
+  let h="", pending=null, buf=[];
+  function flush(){
+    if(pending&&buf.length) h+=`<div class="grp">${pending}</div>`+buf.join("");
+    pending=null; buf=[];
   }
+  for(const it of NAV){
+    if(it.grp){ flush(); pending=it.grp; continue; }
+    if(!navAllowed(it)) continue;
+    buf.push(`<a href="#" data-v="${it.id}" onclick="go('${it.id}');return false;">${it.lbl}</a>`);
+  }
+  flush();
   $("mainNav").innerHTML = h;
   $("bannerRCA").innerHTML = `<div class="b-emb">${ARM_SVG}</div>
     <div class="b-tx">
@@ -54,10 +61,37 @@ function go(v, arg){
   VIEW=v;
   const OUTIL_IDS=OUTILS.map(o=>o.id);
   document.querySelectorAll("#mainNav a").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(a.dataset.v==="parametres"&&OUTIL_IDS.includes(v))));
-  const titles={dashboard:"Tableau de bord",stats:"Statistiques du programme",nouveau:"Désarmement — nouvel enregistrement",registre:"Désarmement — registre des ex-combattants",armes:"Désarmement — registre des armes",docs:"Cartes de démobilisé & attestations de désarmement",import:"Désarmement — importation de données",referentiels:"Référentiels — groupes armés",reintegration:"Réintégration — suivi des parcours",jalons:"Réintégration — formation & intégration à la vie militaire ou civile",carto:"Cartographie des zones de désarmement",recherche:"Recherche multicritère",comptes:"Gestion des comptes utilisateurs",journal:"Journal des opérations",sauvegarde:"Sauvegarde & synchronisation",config:"Configuration du programme",parametres:"Paramètres",fiche:"Dossier individuel"};
+  const titles={
+    dashboard:"Tableau de bord — récapitulatif des tours",
+    stats:"Statistiques du programme",
+    nouveau:"Opération — enregistrement",
+    aptitude:"Opération — aptitude",
+    medecine:"Opération — médecine",
+    kits:"Opération — distribution de kits",
+    registre:"Prise en charge — registre des ex-combattants",
+    armes:"Prise en charge — registre des armes",
+    docs:"Prise en charge — cartes & attestations",
+    reintegration:"Prise en charge — suivi des réintégrations",
+    jalons:"Prise en charge — formation & intégration",
+    import:"Administration — importation de données",
+    referentiels:"Administration — groupes armés",
+    carto:"Tableau de bord — carte des zones de désarmement",
+    recherche:"Recherche multicritère",
+    comptes:"Gestion des comptes utilisateurs",
+    journal:"Journal des opérations",
+    sauvegarde:"Sauvegarde & synchronisation",
+    config:"Configuration du programme",
+    parametres:"Administration — paramètres",
+    fiche:"Dossier individuel"
+  };
   $("pageTitle").textContent = titles[v]||"";
-  const R={dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rDocs,import:()=>rImport(arg),referentiels:rReferentiels,reintegration:rReint,jalons:rJalons,carto:rCarto,recherche:rRecherche,comptes:rComptes,journal:rJournal,sauvegarde:rSauvegarde,config:rConfig,parametres:rParametres,fiche:()=>rFiche(arg)};
+  const R={
+    dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rDocs,
+    aptitude:()=>rOperationAttente("aptitude"),medecine:()=>rOperationAttente("medecine"),kits:()=>rOperationAttente("kits"),
+    import:()=>rImport(arg),referentiels:rReferentiels,reintegration:rReint,jalons:rJalons,carto:rCarto,
+    recherche:rRecherche,comptes:rComptes,journal:rJournal,sauvegarde:rSauvegarde,config:rConfig,parametres:rParametres,
+    fiche:()=>rFiche(arg)
+  };
   (R[v]||rDash)();
   $("view").scrollTop=0;
 }
-

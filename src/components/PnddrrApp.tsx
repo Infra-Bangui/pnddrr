@@ -62,6 +62,7 @@ const SHELL_HTML = `
     <nav id="mainNav"></nav>
     <div class="userbox">
       <b id="uName"></b><span class="role" id="uRole"></span>
+      <span class="zone" id="uZone"></span>
       <button onclick="mMonPass()">Mon mot de passe</button>
       <button onclick="logout()">Se déconnecter</button>
     </div>
@@ -102,7 +103,7 @@ export function PnddrrApp() {
     }
 
     const script = document.createElement("script");
-    script.src = "/engine/pnddrr.bundle.js?v=armes-dedupe-1";
+    script.src = "/engine/pnddrr.bundle.js?v=menu-zone-1";
     script.dataset.pnddrrEngine = "1";
     script.onerror = () => setStatus("error");
     document.body.appendChild(script);

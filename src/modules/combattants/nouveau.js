@@ -3,7 +3,12 @@
 function selOpts(arr,sel){ return arr.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join(""); }
 function rNouveau(edit){
   const c = edit ? DB.combattants.find(x=>x.id===edit) : null;
+  const lock=regionVerrouillee();
+  const regProfil=regionAgent();
+  const sansZone=lock&&!regProfil;
+  const regInit=regProfil||(c?regionOf(c.prefecture):"")||Object.keys(REGIONS)[0];
   $("view").innerHTML = `
+  ${sansZone?`<div class="panel" style="border-color:#E3B4B4"><div class="pb"><b style="color:var(--danger)">Zone non paramétrée.</b> La région d'enregistrement est liée au profil de l'agent. Demandez à l'administrateur de la renseigner dans Paramètres → Comptes (mutation = changement de zone dans le compte).</div></div>`:""}
   <div class="panel"><div class="ph"><h3>${c?`Modification du dossier ${c.num}`:"Fiche d'enregistrement individuel"}</h3></div><div class="pb">
   <form id="fEnr" onsubmit="return false">
     <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:14px">
@@ -11,6 +16,7 @@ function rNouveau(edit){
         <div class="photo-box" id="phBox">${c&&c.photo?`<img src="${c.photo}">`:"Photo<br>d'identité"}</div>
         <input type="file" id="phFile" accept="image/*" capture="environment" style="margin-top:7px;font-size:11.5px;border:none;padding:0">
         <div class="small muted" style="margin-top:3px">La photo est automatiquement compressée (≈300 px) pour préserver la capacité de stockage.</div>
+        <div id="fpBox" class="fp-box" style="margin-top:12px"></div>
       </div>
       <div style="flex:1">
         <div class="grid3">
@@ -27,8 +33,9 @@ function rNouveau(edit){
       </div>
     </div>
     <h3 style="color:var(--teal-dark);margin:8px 0 10px;font-size:13.5px;text-transform:uppercase">Localisation</h3>
+    <p class="small muted" style="margin:-4px 0 10px">${lock?"Région issue du profil agent — elle ne se choisit pas à l'enregistrement. En cas de mutation, l'administrateur change la zone dans Paramètres → Comptes.":"La région par défaut peut être renseignée sur chaque compte agent pour éviter les erreurs de saisie."}</p>
     <div class="grid3">
-      <div class="field"><label>Région</label><select id="e_region" onchange="fillPref()">${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${c&&regionOf(c.prefecture)===r?"selected":""}>${v.num}. ${esc(r)}${r==="Bas-Oubangui"?" (Bangui)":""}</option>`).join("")}</select></div>
+      <div class="field${lock?" locked":""}"><label>Région</label><select id="e_region" ${lock||sansZone?"disabled":""} onchange="fillPref()">${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${r===regInit?"selected":""}>${v.num}. ${esc(r)}${r==="Bas-Oubangui"?" (Bangui)":""}</option>`).join("")}</select></div>
       <div class="field"><label>Préfecture *</label><select id="e_pref" onchange="fillLoc()"></select></div>
       <div class="field"><label>Sous-préfecture</label><select id="e_sp"></select><input id="e_sp_libre" placeholder="Préciser la sous-préfecture" style="display:none;margin-top:5px"></div>
       <div class="field"><label>Commune</label><select id="e_commune"></select><input id="e_commune_libre" placeholder="Préciser la commune" style="display:none;margin-top:5px"></div>
@@ -74,8 +81,11 @@ function rNouveau(edit){
   };
   window.fillPref = function(){
     const reg=$("e_region").value;
-    const list=REGIONS[reg].prefs;
-    const cur=(c&&list.includes(c.prefecture))?c.prefecture:list[0];
+    const list=(REGIONS[reg]&&REGIONS[reg].prefs)||[];
+    if(!list.length){ $("e_pref").innerHTML=""; return; }
+    const cur=(c&&list.includes(c.prefecture))?c.prefecture
+      :(!c&&CUR&&CUR.prefecture&&list.includes(CUR.prefecture))?CUR.prefecture
+      :list[0];
     $("e_pref").innerHTML=list.map(p=>`<option ${p===cur?"selected":""}>${esc(p)}</option>`).join("");
     fillLoc();
   };
@@ -96,6 +106,7 @@ function rNouveau(edit){
     majVague();
   };
   fillPref();
+  if(typeof uiEmpreinte==="function") uiEmpreinte("fpBox", c&&c.empreinte);
   const locVal=(sel,libre)=>{ const v=$(sel).value; return v==="__autre"?$(libre).value.trim():v; };
   let photoData = c?c.photo||null:null;
   $("phFile").addEventListener("change",e=>{
@@ -120,14 +131,19 @@ function rNouveau(edit){
     r.readAsDataURL(f);
   });
   window.submitEnr = function(){
+    if(sansZone){ toast("Impossible d'enregistrer : votre zone géographique n'est pas paramétrée."); return; }
     if(!$("e_nom").value.trim()||!$("e_prenom").value.trim()){ toast("Le nom et le prénom sont obligatoires."); return; }
     if(!$("e_vague").value.trim()){ toast("La vague d'enregistrement est obligatoire — elle permet le suivi jusqu'à la formation."); return; }
+    const prefVal=$("e_pref").value;
+    if(lock&&regProfil&&regionOf(prefVal)!==regProfil){ toast("La préfecture doit appartenir à votre région de travail ("+regionLabel(regProfil)+")."); return; }
+    const fpBox=$("fpBox");
     const d={
       nom:$("e_nom").value.trim().toUpperCase(), prenom:$("e_prenom").value.trim(), alias:$("e_alias").value.trim(),
       sexe:$("e_sexe").value, dn:$("e_dn").value, ln:$("e_ln").value.trim(), nat:$("e_nat").value.trim(), tel:$("e_tel").value.trim(),
-      fam:$("e_fam").value, prefecture:$("e_pref").value, sousPref:locVal("e_sp","e_sp_libre"), commune:locVal("e_commune","e_commune_libre"), site:$("e_site").value.trim(), vague:$("e_vague").value.trim(),
+      fam:$("e_fam").value, prefecture:prefVal, sousPref:locVal("e_sp","e_sp_libre"), commune:locVal("e_commune","e_commune_libre"), site:$("e_site").value.trim(), vague:$("e_vague").value.trim(),
       groupe:$("e_grp").value, grade:$("e_grade").value.trim(), annees:$("e_annees").value, zone:$("e_zone").value.trim(),
-      souhait:$("e_souhait").value, instr:$("e_instr").value, obs:$("e_obs").value.trim(), photo:photoData
+      souhait:$("e_souhait").value, instr:$("e_instr").value, obs:$("e_obs").value.trim(), photo:photoData,
+      empreinte:fpBox&&typeof fpBox.getEmpreinte==="function"?fpBox.getEmpreinte():(c&&c.empreinte)||null
     };
     if(c){ Object.assign(c,d); log("Modification dossier",`${c.num} — ${c.nom} ${c.prenom}`); toast("Dossier mis à jour."); go("fiche",c.id); }
     else{

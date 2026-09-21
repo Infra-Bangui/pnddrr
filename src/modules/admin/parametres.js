@@ -5,7 +5,7 @@ const OUTIL_DESC={
   import:["Importer des données","Charger des fichiers CSV, Excel, Word ou PDF : dossiers d'ex-combattants et registres d'armes, avec contrôle et synchronisation."],
   referentiels:["Référentiels (groupes armés)","Ajouter, renommer ou supprimer les groupes armés proposés dans les formulaires et les filtres."],
   config:["Configuration du programme","Régler les seuils d'alerte, le verrouillage, la pagination, les documents officiels et les éléments de la carte de démobilisé."],
-  comptes:["Gestion des comptes","Créer les comptes des agents et attribuer leurs autorisations, profil par profil."],
+  comptes:["Gestion des comptes","Créer les comptes, lier chaque agent à sa région de travail, et attribuer les autorisations."],
   journal:["Journal des opérations","Consulter l'historique horodaté de toutes les opérations effectuées dans l'application."],
   sauvegarde:["Sauvegarde & synchronisation","Fonctionnement hors ligne, enregistrement local, échanges JSON entre postes et fusion multi-postes."]
 };

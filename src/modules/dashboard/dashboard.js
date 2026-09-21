@@ -64,6 +64,7 @@ function rDash(){
   const demoN=DB.combattants.filter(x=>x.agent==="Poste de démonstration").length;
   $("view").innerHTML = `
   ${rappelSauvegarde()}
+  ${regionVerrouillee()&&!regionAgent()?`<div class="small" style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:9px 13px;margin-bottom:13px"><b style="color:var(--danger)">Zone non paramétrée.</b> Votre région de travail doit être liée à votre compte (Paramètres → Comptes). Sans cette zone, l'enregistrement est bloqué pour éviter une saisie de région erronée.</div>`:""}
   ${demoN?`<div class="small" style="background:#FFF9E6;border:1px solid #E8D48A;border-radius:8px;padding:9px 13px;margin-bottom:13px">▸ <b>Mode simulation :</b> ${demoN} dossier(s) fictifs de démonstration sont chargés pour découvrir le programme. Pour repartir de zéro : ${CUR.role==="admin"?`onglet Sauvegarde → « Effacer les données locales »`:`demandez à l'administrateur d'effacer les données locales`}.</div>`:""}
   <div class="toolbar">
     <div class="field"><label>Région</label><select onchange="dashSet('reg',this.value)"><option value="">Toutes</option>${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${DASH_F.reg===r?"selected":""}>${v.num}. ${esc(r)}</option>`).join("")}</select></div>

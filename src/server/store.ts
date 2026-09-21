@@ -11,6 +11,9 @@ export type PnddrrUser = {
   actif: boolean;
   perms?: string[];
   passUpdated?: boolean;
+  /** Région de travail (référentiel REGIONS). Liée au profil, pas saisie à l'enregistrement. */
+  region?: string;
+  prefecture?: string;
 };
 
 export type PnddrrDb = {
@@ -134,7 +137,7 @@ function sanitizeDb(db: PnddrrDb): PnddrrDb {
 }
 
 function mergeOneComb(ex: Comb, inc: Comb) {
-  for (const f of ["alias", "dn", "ln", "tel", "sousPref", "commune", "site", "grade", "annees", "zone", "obs", "photo", "vague", "groupe", "souhait", "instr", "nat", "fam", "sexe"]) {
+  for (const f of ["alias", "dn", "ln", "tel", "sousPref", "commune", "site", "grade", "annees", "zone", "obs", "photo", "vague", "groupe", "souhait", "instr", "nat", "fam", "sexe", "empreinte"]) {
     if (!ex[f] && inc[f]) ex[f] = inc[f];
   }
   const io = STATUT_ORD[String(inc.statut || "")] ?? -1;
@@ -238,7 +241,13 @@ function mergeUsers(current: PnddrrUser[], incoming: PnddrrUser[]): PnddrrUser[]
       byLogin.set(u.login, u);
       continue;
     }
-    byLogin.set(u.login, { ...prev, ...u, pass: u.pass || prev.pass });
+    byLogin.set(u.login, {
+      ...prev,
+      ...u,
+      pass: u.pass || prev.pass,
+      region: "region" in u ? u.region : prev.region,
+      prefecture: "prefecture" in u ? u.prefecture : prev.prefecture,
+    });
   }
   return [...byLogin.values()];
 }

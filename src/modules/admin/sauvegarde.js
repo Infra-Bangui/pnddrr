@@ -206,7 +206,7 @@ function mergeDB(d){
       ((inc.desarmement&&inc.desarmement.armes)||[]).forEach(a=>{ const k=armeKey(a); if(k) keys.add(k); });
       continue;
     }
-    ["alias","dn","ln","tel","sousPref","commune","site","grade","annees","zone","obs","photo"].forEach(f=>{ if(!ex[f]&&inc[f]) ex[f]=inc[f]; });
+    ["alias","dn","ln","tel","sousPref","commune","site","grade","annees","zone","obs","photo","empreinte"].forEach(f=>{ if(!ex[f]&&inc[f]) ex[f]=inc[f]; });
     if(STATUTS[inc.statut]&&STATUTS[inc.statut].ord>STATUTS[ex.statut].ord) ex.statut=inc.statut;
     if(inc.desarmement){
       if(!ex.desarmement) ex.desarmement={date:inc.desarmement.date,lieu:inc.desarmement.lieu,agent:inc.desarmement.agent,armes:[],munitions:[]};

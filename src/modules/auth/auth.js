@@ -39,13 +39,14 @@ function applyServerDb(db, opts){
     const u=DB.users.find(x=>x.login===login&&x.actif);
     if(u) CUR=u;
   }
+  if(typeof updUserBox==="function"&&CUR) updUserBox();
   if(HAS_LS){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DB)); localStorage.setItem(LS_TS, new Date().toISOString()); }catch(e){} }
   return true;
 }
 function enterSession(u, opts){
   CUR=u; $("loginErr").style.display="none";
   $("loginScreen").style.display="none"; $("app").classList.add("on");
-  $("uName").textContent=u.nom; $("uRole").textContent=ROLES[u.role];
+  updUserBox();
   $("todayLbl").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
   if(!(opts&&opts.resume)) log("Connexion",`Ouverture de session (${ROLES[u.role]})`);
   buildNav(); updNetBadge(); go("dashboard");

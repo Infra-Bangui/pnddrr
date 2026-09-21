@@ -14,6 +14,8 @@ const FILES = [
   "shell/modal.js",
   "dashboard/dashboard.js",
   "combattants/nouveau.js",
+  "operations/attente.js",
+  "biometrie/lecteur.js",
   "combattants/registre.js",
   "demo/seed.js",
   "reintegration/jalons.js",
