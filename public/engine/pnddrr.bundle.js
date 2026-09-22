@@ -80,12 +80,11 @@ const PERMS = {
   orienter:"Orienter en réintégration (militaire / socio-éco.)",
   visites:"Réaliser les visites de suivi",
   cloturer:"Clôturer les parcours et déclarer les abandons",
-  importer:"Importer des données (dossiers, registres d'armes)",
   referentiels:"Gérer les référentiels (groupes armés)"
 };
 const ROLE_PERMS = {
   admin: Object.keys(PERMS),
-  agent: ["enregistrer","desarmer","demobiliser","orienter","visites","cloturer","importer"],
+  agent: ["enregistrer","desarmer","demobiliser","orienter","visites","cloturer"],
   suivi: ["visites"],
   superviseur: []
 };
@@ -448,7 +447,7 @@ const NAV = [
 /* Outils regroupés dans la page Paramètres */
 const OUTILS = [
   {id:"recherche", lbl:"Recherche", roles:["admin","agent","suivi","superviseur"]},
-  {id:"import", lbl:"Importer", perm:"importer"},
+  {id:"import", lbl:"Importer", roles:["admin"]},
   {id:"referentiels", lbl:"Référentiels", perm:"referentiels"},
   {id:"config", lbl:"Configuration", roles:["admin"]},
   {id:"comptes", lbl:"Comptes", roles:["admin"]},
@@ -900,7 +899,7 @@ function rRegistre(preset){
     <div class="field" style="flex:1"><label>Recherche rapide</label><input id="fTxt" placeholder="Nom, alias, n° dossier…" oninput="filtRegistre()"></div>
     <button class="btn sec" onclick="exportCombCSV()">Exporter CSV</button>
     <button class="btn sec" onclick="exportXLSX()">Exporter Excel</button>
-    <button class="btn sec" onclick="go('import')">Importer…</button>
+    ${CUR.role==="admin"?`<button class="btn sec" onclick="go('import')">Importer…</button>`:""}
   </div>
   <div class="panel"><div class="pb nopad"><table><thead><tr><th>N° dossier</th><th>Nom & prénom</th><th>Sexe</th><th>Groupe armé</th><th>Préfecture</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="tbReg"></tbody></table></div></div>`;
   REG_LIM=PAGE_TAILLE;
@@ -1688,7 +1687,7 @@ function rArmes(){
     <div class="field"><label>Type</label><select id="wType" onchange="filtArmes()"><option value="">Tous</option>${TYPES_ARMES.map(t=>`<option>${t}</option>`).join("")}</select></div>
     <div class="field" style="flex:1"><label>Recherche</label><input id="wTxt" placeholder="N° série, nom, dossier…" oninput="filtArmes()"></div>
     <button class="btn sec" onclick="exportArmesCSV()">Exporter CSV</button>
-    ${hasPerm("importer")?`<button class="btn sec" onclick="go('import','armes')">Importer un registre…</button>`:""}
+    ${CUR.role==="admin"?`<button class="btn sec" onclick="go('import','armes')">Importer un registre…</button>`:""}
     <button class="btn sec" onclick="printRegArmes()">Imprimer le registre</button>
   </div>
   <div class="panel"><div class="ph"><h3>Armes collectées</h3><span class="muted small">cycle de vie : dépôt → scellé → destruction</span></div><div class="pb nopad"><table><thead><tr><th>Type</th><th>Marque</th><th>N° série</th><th>État</th><th>Garde</th><th>Remise par</th><th>Dossier</th><th>Date / lieu</th><th>Actions</th></tr></thead><tbody id="tbArm"></tbody></table></div></div>
@@ -3057,6 +3056,7 @@ const normTxt = s => String(s==null?"":s).toLowerCase().normalize("NFD").replace
 
 /* ---------- Vue ---------- */
 function rImport(kind){
+  if(!CUR||CUR.role!=="admin"){ toast("L'importation est réservée à l'administrateur."); go("parametres"); return; }
   IMP={kind:kind||IMP.kind||"comb",grid:null,headers:[],map:{},fileName:"",report:null};
   const armes=IMP.kind==="armes";
   $("view").innerHTML = `
@@ -3349,6 +3349,7 @@ function impPreviewArmes(){
   $("impReport").innerHTML="";
 }
 function impSyncArmes(){
+  if(!CUR||CUR.role!=="admin"){ toast("L'importation est réservée à l'administrateur."); return; }
   const mode=$("impModeArmes").value;
   const series=new Set(allArmes().map(a=>normTxt(a.serie)).filter(x=>x));
   const ajoutees=[], crees=[], skipped=[];
@@ -3416,6 +3417,7 @@ function impStubs(c){
   delete c._carte; delete c._corps; delete c._matricule; delete c._filiere;
 }
 function impSync(){
+  if(!CUR||CUR.role!=="admin"){ toast("L'importation est réservée à l'administrateur."); return; }
   const mode=$("impMode").value;
   const created=[], updated=[], skipped=[];
   for(const r of IMP.rows){

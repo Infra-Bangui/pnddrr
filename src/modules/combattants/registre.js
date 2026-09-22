@@ -11,7 +11,7 @@ function rRegistre(preset){
     <div class="field" style="flex:1"><label>Recherche rapide</label><input id="fTxt" placeholder="Nom, alias, n° dossier…" oninput="filtRegistre()"></div>
     <button class="btn sec" onclick="exportCombCSV()">Exporter CSV</button>
     <button class="btn sec" onclick="exportXLSX()">Exporter Excel</button>
-    <button class="btn sec" onclick="go('import')">Importer…</button>
+    ${CUR.role==="admin"?`<button class="btn sec" onclick="go('import')">Importer…</button>`:""}
   </div>
   <div class="panel"><div class="pb nopad"><table><thead><tr><th>N° dossier</th><th>Nom & prénom</th><th>Sexe</th><th>Groupe armé</th><th>Préfecture</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="tbReg"></tbody></table></div></div>`;
   REG_LIM=PAGE_TAILLE;

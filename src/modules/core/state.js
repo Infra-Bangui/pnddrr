@@ -23,12 +23,11 @@ const PERMS = {
   orienter:"Orienter en réintégration (militaire / socio-éco.)",
   visites:"Réaliser les visites de suivi",
   cloturer:"Clôturer les parcours et déclarer les abandons",
-  importer:"Importer des données (dossiers, registres d'armes)",
   referentiels:"Gérer les référentiels (groupes armés)"
 };
 const ROLE_PERMS = {
   admin: Object.keys(PERMS),
-  agent: ["enregistrer","desarmer","demobiliser","orienter","visites","cloturer","importer"],
+  agent: ["enregistrer","desarmer","demobiliser","orienter","visites","cloturer"],
   suivi: ["visites"],
   superviseur: []
 };

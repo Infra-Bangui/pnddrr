@@ -67,7 +67,7 @@ function rArmes(){
     <div class="field"><label>Type</label><select id="wType" onchange="filtArmes()"><option value="">Tous</option>${TYPES_ARMES.map(t=>`<option>${t}</option>`).join("")}</select></div>
     <div class="field" style="flex:1"><label>Recherche</label><input id="wTxt" placeholder="N° série, nom, dossier…" oninput="filtArmes()"></div>
     <button class="btn sec" onclick="exportArmesCSV()">Exporter CSV</button>
-    ${hasPerm("importer")?`<button class="btn sec" onclick="go('import','armes')">Importer un registre…</button>`:""}
+    ${CUR.role==="admin"?`<button class="btn sec" onclick="go('import','armes')">Importer un registre…</button>`:""}
     <button class="btn sec" onclick="printRegArmes()">Imprimer le registre</button>
   </div>
   <div class="panel"><div class="ph"><h3>Armes collectées</h3><span class="muted small">cycle de vie : dépôt → scellé → destruction</span></div><div class="pb nopad"><table><thead><tr><th>Type</th><th>Marque</th><th>N° série</th><th>État</th><th>Garde</th><th>Remise par</th><th>Dossier</th><th>Date / lieu</th><th>Actions</th></tr></thead><tbody id="tbArm"></tbody></table></div></div>

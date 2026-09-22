@@ -71,6 +71,7 @@ const normTxt = s => String(s==null?"":s).toLowerCase().normalize("NFD").replace
 
 /* ---------- Vue ---------- */
 function rImport(kind){
+  if(!CUR||CUR.role!=="admin"){ toast("L'importation est réservée à l'administrateur."); go("parametres"); return; }
   IMP={kind:kind||IMP.kind||"comb",grid:null,headers:[],map:{},fileName:"",report:null};
   const armes=IMP.kind==="armes";
   $("view").innerHTML = `
@@ -363,6 +364,7 @@ function impPreviewArmes(){
   $("impReport").innerHTML="";
 }
 function impSyncArmes(){
+  if(!CUR||CUR.role!=="admin"){ toast("L'importation est réservée à l'administrateur."); return; }
   const mode=$("impModeArmes").value;
   const series=new Set(allArmes().map(a=>normTxt(a.serie)).filter(x=>x));
   const ajoutees=[], crees=[], skipped=[];
@@ -430,6 +432,7 @@ function impStubs(c){
   delete c._carte; delete c._corps; delete c._matricule; delete c._filiere;
 }
 function impSync(){
+  if(!CUR||CUR.role!=="admin"){ toast("L'importation est réservée à l'administrateur."); return; }
   const mode=$("impMode").value;
   const created=[], updated=[], skipped=[];
   for(const r of IMP.rows){

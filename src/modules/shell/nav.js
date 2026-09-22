@@ -22,7 +22,7 @@ const NAV = [
 /* Outils regroupés dans la page Paramètres */
 const OUTILS = [
   {id:"recherche", lbl:"Recherche", roles:["admin","agent","suivi","superviseur"]},
-  {id:"import", lbl:"Importer", perm:"importer"},
+  {id:"import", lbl:"Importer", roles:["admin"]},
   {id:"referentiels", lbl:"Référentiels", perm:"referentiels"},
   {id:"config", lbl:"Configuration", roles:["admin"]},
   {id:"comptes", lbl:"Comptes", roles:["admin"]},
