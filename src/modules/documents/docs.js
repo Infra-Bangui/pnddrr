@@ -206,22 +206,32 @@ function carteHtml(c){
 }
 function printCarte(id){
   const c=DB.combattants.find(x=>x.id===id);
+  if(!c.auditRemise||!c.auditRemise.photo){
+    toast("Enregistrez d'abord la photo d'audit (combattant avec l'argent reçu) dans Distribution de kits.");
+    if(typeof mAuditRemise==="function") mAuditRemise(id);
+    else go("kits");
+    return;
+  }
   doPrint(carteHtml(c), "pvc");
   log("Impression",`Carte de démobilisé ${c.demobilisation.carte}`);
 }
 var DOC_Q="";
-function docSearch(v){ DOC_Q=v; rDocs(); const el=$("doc_q"); if(el){ el.focus(); const n=el.value.length; try{el.setSelectionRange(n,n);}catch(e){} } }
+function docSearch(v){
+  DOC_Q=v;
+  if(VIEW==="kits") rKits(); else rDocs();
+  const el=$("doc_q"); if(el){ el.focus(); const n=el.value.length; try{el.setSelectionRange(n,n);}catch(e){} }
+}
 function docMatch(c){
   const q=DOC_Q.trim().toLowerCase(); if(!q) return true;
   return [c.num,c.nom,c.prenom,c.alias,c.vague,c.prefecture,c.groupe,c.demobilisation?c.demobilisation.carte:""].join(" ").toLowerCase().includes(q);
 }
-function rDocs(){
+function docsContenuHtml(){
   const cartes=DB.combattants.filter(c=>c.demobilisation&&docMatch(c)).sort((a,b)=>a.demobilisation.carte.localeCompare(b.demobilisation.carte));
   const attests=DB.combattants.filter(c=>c.desarmement&&docMatch(c)).sort((a,b)=>a.num.localeCompare(b.num));
-  $("view").innerHTML = `
+  return `
   <div class="toolbar">
     <div class="field" style="flex:1;max-width:520px"><label>Recherche</label><input id="doc_q" value="${esc(DOC_Q)}" oninput="docSearch(this.value)" placeholder="Nom, n° dossier, n° de carte, vague, préfecture…"></div>
-    ${DOC_Q?`<button class="btn ghost" style="align-self:end" onclick="DOC_Q='';rDocs()">✕ Effacer</button>`:""}
+    ${DOC_Q?`<button class="btn ghost" style="align-self:end" onclick="DOC_Q='';${VIEW==="kits"?"rKits":"rDocs"}()">✕ Effacer</button>`:""}
   </div>
   <div class="cards">
     <div class="kpi c-dem"><div class="n">${cartes.length}</div><div class="l">Cartes de démobilisé délivrées</div></div>
@@ -248,7 +258,7 @@ function rDocs(){
       <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
       <td>${c.num}</td><td>${fmtD(c.demobilisation.date)}</td><td class="small">${esc(c.demobilisation.lieu)}</td>
       <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
-      <td class="actions-cell"><button class="btn sm sec" onclick="printCarte('${c.id}')">Voir / imprimer la carte</button></td></tr>`).join("")
+      <td class="actions-cell"><button class="btn sm sec" onclick="printCarte('${c.id}')">${c.auditRemise&&c.auditRemise.photo?"Voir / imprimer":"Photo d'audit requise"}</button></td></tr>`).join("")
     }</tbody></table>`:`<div class="empty">Aucune carte de démobilisé${DOC_Q?" ne correspond à la recherche":" délivrée pour le moment"}.</div>`}</div></div>
   <div class="panel"><div class="ph"><h3>Partie 2 — Attestations de désarmement (${attests.length})</h3>
     <span style="display:flex;gap:7px">
@@ -263,6 +273,9 @@ function rDocs(){
       <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
       <td class="actions-cell"><button class="btn sm sec" onclick="printAttestation('${c.id}')">Voir / imprimer l'attestation</button></td></tr>`).join("")
     }</tbody></table>`:`<div class="empty">Aucune attestation${DOC_Q?" ne correspond à la recherche":" — les attestations sont produites au désarmement"}.</div>`}</div></div>`;
+}
+function rDocs(){
+  $("view").innerHTML = `<div class="panel"><div class="ph"><h3>Cartes &amp; attestations</h3></div><div class="pb">${docsContenuHtml()}</div></div>`;
 }
 function savePoste(){
   DB.poste=$("posteNom").value.trim();

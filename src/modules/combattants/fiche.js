@@ -248,8 +248,9 @@ function mDesarmement(id){
     <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tMun tbody').insertAdjacentHTML('beforeend', munRow())">+ Ajouter des munitions</button>`,
     `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveDesarmement('${id}')">Valider le désarmement</button>`);
 }
-function saveDesarmement(id){
-  const c=DB.combattants.find(x=>x.id===id);
+function readDesarmementForm(requireItems){
+  const tArmes=document.querySelector("#tArmes tbody");
+  if(!tArmes) return null;
   const armes=[...document.querySelectorAll("#tArmes tbody tr")].map(tr=>({
     type:tr.querySelector(".a_type").value, marque:tr.querySelector(".a_marque").value.trim(),
     calibre:tr.querySelector(".a_calibre").value.trim(), serie:tr.querySelector(".a_serie").value.trim(),
@@ -259,10 +260,18 @@ function saveDesarmement(id){
     nature:tr.querySelector(".m_nature").value.trim(), qte:+tr.querySelector(".m_qte").value||0,
     unite:tr.querySelector(".m_unite").value, obs:tr.querySelector(".m_obs").value.trim()
   })).filter(m=>m.nature||m.qte);
-  if(!armes.length&&!munitions.length){ toast("Ajoutez au moins une arme ou un lot de munitions."); return; }
-  c.desarmement={date:$("d_date").value||today(), lieu:$("d_lieu").value.trim()||c.site||c.prefecture, agent:CUR.nom, armes, munitions};
+  if(requireItems&&!armes.length&&!munitions.length) return null;
+  const cRef= FICHE_ID?DB.combattants.find(x=>x.id===FICHE_ID):null;
+  return {date:($("d_date")&&$("d_date").value)||today(), lieu:($("d_lieu")&&$("d_lieu").value.trim())||(cRef&&(cRef.site||cRef.prefecture))||"", agent:CUR.nom, armes, munitions};
+}
+function saveDesarmement(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  const data=readDesarmementForm(true);
+  if(!data){ toast("Ajoutez au moins une arme ou un lot de munitions."); return; }
+  c.desarmement=data;
+  if(!c.desarmement.lieu) c.desarmement.lieu=c.site||c.prefecture;
   c.statut="desarme";
-  log("Désarmement",`${c.num} — ${armes.length} arme(s) et ${munitions.length} lot(s) de munitions réceptionnés`);
+  log("Désarmement",`${c.num} — ${data.armes.length} arme(s) et ${data.munitions.length} lot(s) de munitions réceptionnés`);
   closeModal(); toast("Désarmement enregistré."); rFiche(id);
 }
 function mDemobilisation(id){

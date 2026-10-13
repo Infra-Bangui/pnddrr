@@ -434,7 +434,6 @@ const NAV = [
   {grp:"Prise en charge"},
   {id:"registre", lbl:"Registre des ex-combattants", roles:["admin","agent","suivi","superviseur"]},
   {id:"armes", lbl:"Registre des armes", roles:["admin","agent","suivi","superviseur"]},
-  {id:"docs", lbl:"Cartes & attestations", roles:["admin","agent","suivi","superviseur"]},
   {id:"reintegration", lbl:"Suivi des réintégrations", roles:["admin","agent","suivi","superviseur"]},
   {id:"jalons", lbl:"Formation & intégration", roles:["admin","agent","suivi","superviseur"]},
   {grp:"Tableau de bord"},
@@ -482,7 +481,9 @@ function viewAllowed(v){
   return it?navAllowed(it):true;
 }
 function go(v, arg){
+  if(v==="docs") v="kits";
   if(!viewAllowed(v)){ toast("Accès non autorisé pour ce compte."); return; }
+  if(v==="nouveau"&&!arg){ ENR_STEP=1; ENR_DRAFT={photo:null,empreinte:null,identity:null}; }
   VIEW=v;
   const OUTIL_IDS=OUTILS.map(o=>o.id);
   document.querySelectorAll("#mainNav a").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(a.dataset.v==="parametres"&&OUTIL_IDS.includes(v))));
@@ -495,7 +496,7 @@ function go(v, arg){
     kits:"Opération — distribution de kits",
     registre:"Prise en charge — registre des ex-combattants",
     armes:"Prise en charge — registre des armes",
-    docs:"Prise en charge — cartes & attestations",
+    docs:"Opération — distribution de kits (cartes & attestations)",
     reintegration:"Prise en charge — suivi des réintégrations",
     jalons:"Prise en charge — formation & intégration",
     import:"Administration — importation de données",
@@ -511,8 +512,8 @@ function go(v, arg){
   };
   $("pageTitle").textContent = titles[v]||"";
   const R={
-    dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rDocs,
-    aptitude:()=>rOperationAttente("aptitude"),medecine:()=>rOperationAttente("medecine"),kits:()=>rOperationAttente("kits"),
+    dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rKits,
+    aptitude:rAptitude,medecine:rMedecine,kits:rKits,
     import:()=>rImport(arg),referentiels:rReferentiels,reintegration:rReint,jalons:rJalons,carto:rCarto,
     recherche:rRecherche,comptes:rComptes,journal:rJournal,sauvegarde:rSauvegarde,config:rConfig,parametres:rParametres,
     fiche:()=>rFiche(arg)
@@ -642,192 +643,408 @@ function rDash(){
 
 
 /* module: combattants/nouveau.js — PNDDRR engine (classic globals) */
-/* ================= NOUVEL ENREGISTREMENT ================= */
-function selOpts(arr,sel){ return arr.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join(""); }
-function rNouveau(edit){
-  const c = edit ? DB.combattants.find(x=>x.id===edit) : null;
-  const lock=regionVerrouillee();
-  const regProfil=regionAgent();
-  const sansZone=lock&&!regProfil;
-  const regInit=regProfil||(c?regionOf(c.prefecture):"")||Object.keys(REGIONS)[0];
-  $("view").innerHTML = `
-  ${sansZone?`<div class="panel" style="border-color:#E3B4B4"><div class="pb"><b style="color:var(--danger)">Zone non paramétrée.</b> La région d'enregistrement est liée au profil de l'agent. Demandez à l'administrateur de la renseigner dans Paramètres → Comptes (mutation = changement de zone dans le compte).</div></div>`:""}
-  <div class="panel"><div class="ph"><h3>${c?`Modification du dossier ${c.num}`:"Fiche d'enregistrement individuel"}</h3></div><div class="pb">
-  <form id="fEnr" onsubmit="return false">
-    <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:14px">
-      <div>
-        <div class="photo-box" id="phBox">${c&&c.photo?`<img src="${c.photo}">`:"Photo<br>d'identité"}</div>
-        <input type="file" id="phFile" accept="image/*" capture="environment" style="margin-top:7px;font-size:11.5px;border:none;padding:0">
-        <div class="small muted" style="margin-top:3px">La photo est automatiquement compressée (≈300 px) pour préserver la capacité de stockage.</div>
-        <div id="fpBox" class="fp-box" style="margin-top:12px"></div>
+/* ================= NOUVEL ENREGISTREMENT (assistant — biométrie, identité, désarmement) ================= */
+var ENR_STEP = 1;
+var ENR_EDIT_ID = null;
+var ENR_DRAFT = { photo: null, empreinte: null, identity: null };
+
+function enrSaveDraftStep1() {
+  ENR_DRAFT.photo = window._enrPhotoData != null ? window._enrPhotoData : ENR_DRAFT.photo;
+  const fpBox = $("fpBox");
+  if (fpBox && typeof fpBox.getEmpreinte === "function") ENR_DRAFT.empreinte = fpBox.getEmpreinte();
+}
+
+function enrSaveDraftStep2() {
+  if (!$("e_nom")) return;
+  const locVal = (sel, libre) => {
+    const v = $(sel).value;
+    return v === "__autre" ? $(libre).value.trim() : v;
+  };
+  ENR_DRAFT.identity = {
+    nom: $("e_nom").value.trim().toUpperCase(),
+    prenom: $("e_prenom").value.trim(),
+    alias: $("e_alias").value.trim(),
+    sexe: $("e_sexe").value,
+    dn: $("e_dn").value,
+    ln: $("e_ln").value.trim(),
+    nat: $("e_nat").value.trim(),
+    tel: $("e_tel").value.trim(),
+    fam: $("e_fam").value,
+    region: $("e_region").value,
+    prefecture: $("e_pref").value,
+    sousPref: locVal("e_sp", "e_sp_libre"),
+    commune: locVal("e_commune", "e_commune_libre"),
+    site: $("e_site").value.trim(),
+    vague: $("e_vague").value.trim(),
+    obs: $("e_obs").value.trim(),
+  };
+}
+
+function selOpts(arr, sel) {
+  return arr.map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
+}
+
+function enrStepsHtml(step, showDesarm) {
+  const s1 = step === 1 ? "now" : step > 1 ? "done" : "";
+  const s2 = step === 2 ? "now" : step > 2 ? "done" : "";
+  const s3 = showDesarm ? (step === 3 ? "now" : step > 3 ? "done" : "") : "";
+  let h = `<div class="steps">
+    <div class="step ${s1}">1. Biométrie</div>
+    <div class="step ${s2}">2. Identité &amp; localisation</div>`;
+  if (showDesarm) h += `<div class="step ${s3}">3. Désarmement</div>`;
+  h += `</div>`;
+  return h;
+}
+
+function enrShowDesarmStep(c) {
+  if (c && c.desarmement) return false;
+  return hasPerm("desarmer");
+}
+
+function enrGoStep(n) {
+  if (ENR_STEP === 1 && n > 1) enrSaveDraftStep1();
+  if (ENR_STEP === 2 && n > 2) enrSaveDraftStep2();
+  ENR_STEP = n;
+  rNouveau(ENR_EDIT_ID || undefined);
+}
+
+function rNouveau(edit) {
+  ENR_EDIT_ID = edit || null;
+  const c = edit ? DB.combattants.find((x) => x.id === edit) : null;
+  const idDraft = ENR_DRAFT.identity;
+  const showDes = enrShowDesarmStep(c);
+  const maxStep = showDes ? 3 : 2;
+  if (!edit && ENR_STEP > maxStep) ENR_STEP = maxStep;
+  if (c && c.desarmement && ENR_STEP > 2) ENR_STEP = 2;
+
+  const lock = regionVerrouillee();
+  const regProfil = regionAgent();
+  const sansZone = lock && !regProfil;
+  const regInit = (idDraft && idDraft.region) || regProfil || (c ? regionOf(c.prefecture) : "") || Object.keys(REGIONS)[0];
+  const step = ENR_STEP;
+
+  let body = "";
+  if (step === 1) {
+    body = `
+    <p class="small muted" style="margin-bottom:14px">Capturez la photo d'identité et l'empreinte digitale sur un écran dédié, avant les informations administratives.</p>
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
+      <div style="text-align:center">
+        <div class="photo-box" id="phBox" style="margin:0 auto">${ENR_DRAFT.photo || (c && c.photo) ? `<img src="${ENR_DRAFT.photo || c.photo}">` : "Photo<br>d'identité"}</div>
+        <input type="file" id="phFile" accept="image/*" capture="environment" style="margin-top:10px;font-size:11.5px;border:none;padding:0;max-width:220px">
+        <div class="small muted" style="margin-top:6px;max-width:220px">Compression automatique (≈300 px).</div>
       </div>
-      <div style="flex:1">
-        <div class="grid3">
-          <div class="field"><label>Nom *</label><input id="e_nom" required value="${c?esc(c.nom):""}"></div>
-          <div class="field"><label>Prénom(s) *</label><input id="e_prenom" required value="${c?esc(c.prenom):""}"></div>
-          <div class="field"><label>Alias / nom de guerre</label><input id="e_alias" value="${c?esc(c.alias||""):""}"></div>
-          <div class="field"><label>Sexe *</label><select id="e_sexe"><option ${c&&c.sexe==="M"?"selected":""} value="M">Masculin</option><option ${c&&c.sexe==="F"?"selected":""} value="F">Féminin</option></select></div>
-          <div class="field"><label>Date de naissance</label><input type="date" id="e_dn" value="${c?c.dn||"":""}"></div>
-          <div class="field"><label>Lieu de naissance</label><input id="e_ln" value="${c?esc(c.ln||""):""}"></div>
-          <div class="field"><label>Nationalité</label><input id="e_nat" value="${c?esc(c.nat):"Centrafricaine"}"></div>
-          <div class="field"><label>Téléphone</label><input id="e_tel" value="${c?esc(c.tel||""):""}"></div>
-          <div class="field"><label>Situation familiale</label><select id="e_fam">${selOpts(["Célibataire","Marié(e)","Veuf(ve)","Divorcé(e)"],c?c.fam:"")}</select></div>
-        </div>
-      </div>
+      <div><div id="fpBox" class="fp-box"></div></div>
     </div>
-    <h3 style="color:var(--teal-dark);margin:8px 0 10px;font-size:13.5px;text-transform:uppercase">Localisation</h3>
-    <p class="small muted" style="margin:-4px 0 10px">${lock?"Région issue du profil agent — elle ne se choisit pas à l'enregistrement. En cas de mutation, l'administrateur change la zone dans Paramètres → Comptes.":"La région par défaut peut être renseignée sur chaque compte agent pour éviter les erreurs de saisie."}</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+      ${c ? `<button type="button" class="btn ghost" onclick="go('fiche','${c.id}')">Annuler</button>` : ""}
+      <button class="btn" type="button" onclick="enrGoStep(2)">Suivant — identité</button>
+    </div>`;
+  } else if (step === 2) {
+    body = `
     <div class="grid3">
-      <div class="field${lock?" locked":""}"><label>Région</label><select id="e_region" ${lock||sansZone?"disabled":""} onchange="fillPref()">${Object.entries(REGIONS).map(([r,v])=>`<option value="${esc(r)}" ${r===regInit?"selected":""}>${v.num}. ${esc(r)}${r==="Bas-Oubangui"?" (Bangui)":""}</option>`).join("")}</select></div>
+      <div class="field"><label>Nom *</label><input id="e_nom" required value="${idDraft ? esc(idDraft.nom) : c ? esc(c.nom) : ""}"></div>
+      <div class="field"><label>Prénom(s) *</label><input id="e_prenom" required value="${idDraft ? esc(idDraft.prenom) : c ? esc(c.prenom) : ""}"></div>
+      <div class="field"><label>Alias / nom de guerre</label><input id="e_alias" value="${idDraft ? esc(idDraft.alias) : c ? esc(c.alias || "") : ""}"></div>
+      <div class="field"><label>Sexe *</label><select id="e_sexe"><option ${(idDraft ? idDraft.sexe : c && c.sexe) === "M" ? "selected" : ""} value="M">Masculin</option><option ${(idDraft ? idDraft.sexe : c && c.sexe) === "F" ? "selected" : ""} value="F">Féminin</option></select></div>
+      <div class="field"><label>Date de naissance</label><input type="date" id="e_dn" value="${idDraft ? idDraft.dn || "" : c ? c.dn || "" : ""}"></div>
+      <div class="field"><label>Lieu de naissance</label><input id="e_ln" value="${idDraft ? esc(idDraft.ln) : c ? esc(c.ln || "") : ""}"></div>
+      <div class="field"><label>Nationalité</label><input id="e_nat" value="${idDraft ? esc(idDraft.nat) : c ? esc(c.nat) : "Centrafricaine"}"></div>
+      <div class="field"><label>Téléphone</label><input id="e_tel" value="${idDraft ? esc(idDraft.tel) : c ? esc(c.tel || "") : ""}"></div>
+      <div class="field"><label>Situation familiale</label><select id="e_fam">${selOpts(["Célibataire", "Marié(e)", "Veuf(ve)", "Divorcé(e)"], idDraft ? idDraft.fam : c ? c.fam : "")}</select></div>
+    </div>
+    <h3 style="color:var(--teal-dark);margin:16px 0 10px;font-size:13.5px;text-transform:uppercase">Localisation</h3>
+    <p class="small muted" style="margin:-4px 0 10px">${lock ? "Région issue du profil agent — elle ne se choisit pas à l'enregistrement." : "La région par défaut peut être renseignée sur chaque compte agent."}</p>
+    <div class="grid3">
+      <div class="field${lock ? " locked" : ""}"><label>Région</label><select id="e_region" ${lock || sansZone ? "disabled" : ""} onchange="fillPref()">${Object.entries(REGIONS)
+        .map(
+          ([r, v]) =>
+            `<option value="${esc(r)}" ${r === regInit ? "selected" : ""}>${v.num}. ${esc(r)}${r === "Bas-Oubangui" ? " (Bangui)" : ""}</option>`
+        )
+        .join("")}</select></div>
       <div class="field"><label>Préfecture *</label><select id="e_pref" onchange="fillLoc()"></select></div>
       <div class="field"><label>Sous-préfecture</label><select id="e_sp"></select><input id="e_sp_libre" placeholder="Préciser la sous-préfecture" style="display:none;margin-top:5px"></div>
       <div class="field"><label>Commune</label><select id="e_commune"></select><input id="e_commune_libre" placeholder="Préciser la commune" style="display:none;margin-top:5px"></div>
-      <div class="field"><label>Site de regroupement / cantonnement</label><input id="e_site" value="${c?esc(c.site||""):""}"></div>
-      <div class="field"><label>Vague d'enregistrement (générée automatiquement)</label>
-      <div style="display:flex;gap:6px"><input id="e_vague" list="vagueList" style="flex:1" value="${c?esc(c.vague||""):""}" oninput="this.dataset.man='1'" placeholder="Générée selon la préfecture"><button type="button" class="btn sec sm" title="Ouvrir une nouvelle vague pour cette préfecture" onclick="$('e_vague').dataset.man='';majVague(true)">↻ Nouvelle</button></div>
-      <datalist id="vagueList">${promosConnues().map(p=>`<option>${esc(p)}</option>`).join("")}</datalist>
-      <div class="small muted" style="margin-top:3px">Format automatique : Vague &lt;Préfecture&gt; &lt;Année&gt;-&lt;n°&gt; — les enregistrements du jour dans la même préfecture rejoignent la même vague. Modifiable si besoin, suivie jusqu'à la formation.</div></div>
+      <div class="field"><label>Site de regroupement / cantonnement</label><input id="e_site" value="${idDraft ? esc(idDraft.site) : c ? esc(c.site || "") : ""}"></div>
+      <div class="field"><label>Vague d'enregistrement</label>
+      <div style="display:flex;gap:6px"><input id="e_vague" list="vagueList" style="flex:1" value="${idDraft ? esc(idDraft.vague) : c ? esc(c.vague || "") : ""}" oninput="this.dataset.man='1'" placeholder="Générée selon la préfecture"><button type="button" class="btn sec sm" title="Nouvelle vague" onclick="$('e_vague').dataset.man='';majVague(true)">↻ Nouvelle</button></div>
+      <datalist id="vagueList">${promosConnues()
+        .map((p) => `<option>${esc(p)}</option>`)
+        .join("")}</datalist></div>
     </div>
-    <h3 style="color:var(--teal-dark);margin:8px 0 10px;font-size:13.5px;text-transform:uppercase">Parcours combattant</h3>
-    <div class="grid3">
-      <div class="field"><label>Groupe armé d'origine *</label><div style="display:flex;gap:6px"><select id="e_grp" style="flex:1">${selOpts(GROUPES,c?c.groupe:"")}</select>${hasPerm("referentiels")?`<button type="button" class="btn sec sm" title="Ajouter un groupe armé au référentiel" onclick="quickAddGroupe()">+</button>`:""}</div></div>
-      <div class="field"><label>Fonction / grade dans le groupe</label><input id="e_grade" value="${c?esc(c.grade||""):""}"></div>
-      <div class="field"><label>Années passées dans le groupe</label><input type="number" min="0" id="e_annees" value="${c?c.annees||"":""}"></div>
-      <div class="field"><label>Zone d'opération principale</label><input id="e_zone" value="${c?esc(c.zone||""):""}"></div>
-      <div class="field"><label>Souhait de réintégration</label><select id="e_souhait">${selOpts(["Socio-économique","Militaire","Indécis"],c?c.souhait:"")}</select></div>
-      <div class="field"><label>Niveau d'instruction</label><select id="e_instr">${selOpts(["Aucun","Primaire","Secondaire","Supérieur","Coranique"],c?c.instr:"")}</select></div>
-    </div>
-    <div class="field"><label>Observations</label><textarea id="e_obs" rows="2">${c?esc(c.obs||""):""}</textarea></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      ${c?`<button type="button" class="btn ghost" onclick="go('fiche','${c.id}')">Annuler</button>`:""}
-      <button class="btn" type="button" onclick="submitEnr()">${c?"Enregistrer les modifications":"Ouvrir le dossier"}</button>
-    </div>
-  </form></div></div>`;
-  window.vagueAuto = function(pref, fresh){
-    const an=new Date().getFullYear(), jour=today();
-    /* Même opération : réutiliser la vague des enregistrements du jour dans la même préfecture */
-    if(!fresh){
-      const rec=[...DB.combattants].reverse().find(x=>x.prefecture===pref&&x.vague&&x.creele&&x.creele.slice(0,10)===jour);
-      if(rec) return rec.vague;
+    <div class="field" style="margin-top:10px"><label>Observations</label><textarea id="e_obs" rows="2">${idDraft ? esc(idDraft.obs) : c ? esc(c.obs || "") : ""}</textarea></div>
+    <p class="small muted" style="margin-top:8px">Le parcours combattant (groupe, orientation, instruction…) est saisi au module <b>Aptitude</b>, après l'enregistrement et le désarmement sur le terrain.</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button type="button" class="btn ghost" onclick="enrGoStep(1)">← Biométrie</button>
+      ${c ? `<button type="button" class="btn ghost" onclick="go('fiche','${c.id}')">Annuler</button>` : ""}
+      ${showDes && !c ? `<button class="btn" type="button" onclick="enrGoStep(3)">Suivant — désarmement</button>` : `<button class="btn" type="button" onclick="submitEnr()">${c ? "Enregistrer les modifications" : "Ouvrir le dossier"}</button>`}
+    </div>`;
+  } else {
+    body = `
+    <p class="small muted" style="margin-bottom:12px">Sur le terrain, l'agent d'enregistrement procède au désarmement dans la foulée de l'ouverture du dossier. Saisissez le procès-verbal de remise des armes et munitions.</p>
+    <div class="grid2"><div class="field"><label>Date de remise</label><input type="date" id="d_date" value="${today()}"></div>
+    <div class="field"><label>Lieu / site de collecte</label><input id="d_lieu" value="${c ? esc(c.site || c.prefecture || "") : ""}"></div></div>
+    <label>Armement et matériel remis</label>
+    <table id="tArmes"><thead><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th><th>Munitions</th><th></th></tr></thead>
+    <tbody>${armeRow(0)}</tbody></table>
+    <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tArmes tbody').insertAdjacentHTML('beforeend', armeRow())">+ Ajouter une arme</button>
+    <h3 style="color:var(--teal-dark);margin:16px 0 8px;font-size:13px;text-transform:uppercase">Munitions et explosifs remis</h3>
+    <table id="tMun"><thead><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th><th></th></tr></thead><tbody></tbody></table>
+    <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tMun tbody').insertAdjacentHTML('beforeend', munRow())">+ Ajouter des munitions</button>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <button type="button" class="btn ghost" onclick="enrGoStep(2)">← Identité</button>
+      <button class="btn" type="button" onclick="submitEnr()">${c ? "Enregistrer" : "Valider l'enregistrement et le désarmement"}</button>
+    </div>`;
+  }
+
+  $("view").innerHTML = `
+  ${sansZone ? `<div class="panel" style="border-color:#E3B4B4"><div class="pb"><b style="color:var(--danger)">Zone non paramétrée.</b> Demandez à l'administrateur de renseigner votre région dans Paramètres → Comptes.</div></div>` : ""}
+  <div class="panel"><div class="ph"><h3>${c ? `Modification du dossier ${c.num}` : "Fiche d'enregistrement individuel"}</h3></div><div class="pb">
+  ${enrStepsHtml(step, showDes)}
+  <form id="fEnr" onsubmit="return false">${body}</form>
+  </div></div>`;
+
+  window.vagueAuto = function (pref, fresh) {
+    const an = new Date().getFullYear(),
+      jour = today();
+    if (!fresh) {
+      const rec = [...DB.combattants].reverse().find((x) => x.prefecture === pref && x.vague && x.creele && x.creele.slice(0, 10) === jour);
+      if (rec) return rec.vague;
     }
-    /* Sinon : numéro suivant pour la préfecture et l'année */
-    const rx=new RegExp("^Vague "+pref.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+" "+an+"-(\\d+)$");
-    let max=0;
-    DB.combattants.forEach(x=>{ const m=x.vague&&x.vague.match(rx); if(m) max=Math.max(max,+m[1]); });
-    return `Vague ${pref} ${an}-${max+1}`;
+    const rx = new RegExp("^Vague " + pref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " " + an + "-(\\d+)$");
+    let max = 0;
+    DB.combattants.forEach((x) => {
+      const m = x.vague && x.vague.match(rx);
+      if (m) max = Math.max(max, +m[1]);
+    });
+    return `Vague ${pref} ${an}-${max + 1}`;
   };
-  window.majVague = function(force){
-    const v=$("e_vague"); if(!v) return;
-    if(c&&!force) return;                       /* modification d'un dossier : conserver la vague existante */
-    if(v.dataset.man==="1"&&!force) return;     /* saisie manuelle : ne pas écraser */
-    v.value=vagueAuto($("e_pref").value, force===true); v.dataset.man="";
+  window.majVague = function (force) {
+    const v = $("e_vague");
+    if (!v) return;
+    if (c && !force) return;
+    if (v.dataset.man === "1" && !force) return;
+    v.value = vagueAuto($("e_pref").value, force === true);
+    v.dataset.man = "";
   };
-  window.fillPref = function(){
-    const reg=$("e_region").value;
-    const list=(REGIONS[reg]&&REGIONS[reg].prefs)||[];
-    if(!list.length){ $("e_pref").innerHTML=""; return; }
-    const cur=(c&&list.includes(c.prefecture))?c.prefecture
-      :(!c&&CUR&&CUR.prefecture&&list.includes(CUR.prefecture))?CUR.prefecture
-      :list[0];
-    $("e_pref").innerHTML=list.map(p=>`<option ${p===cur?"selected":""}>${esc(p)}</option>`).join("");
+  window.fillPref = function () {
+    const reg = $("e_region").value;
+    const list = (REGIONS[reg] && REGIONS[reg].prefs) || [];
+    if (!list.length) {
+      $("e_pref").innerHTML = "";
+      return;
+    }
+    const cur =
+      idDraft && list.includes(idDraft.prefecture)
+        ? idDraft.prefecture
+        : c && list.includes(c.prefecture)
+          ? c.prefecture
+          : !c && CUR && CUR.prefecture && list.includes(CUR.prefecture)
+            ? CUR.prefecture
+            : list[0];
+    $("e_pref").innerHTML = list.map((p) => `<option ${p === cur ? "selected" : ""}>${esc(p)}</option>`).join("");
     fillLoc();
   };
-  window.fillLoc = function(){
-    const pref=$("e_pref").value;
-    const mk=(sel,libre,list,cur)=>{
-      const el=$(sel), lb=$(libre);
-      const inList=cur&&list.includes(cur);
-      el.innerHTML='<option value="">— Non précisée —</option>'
-        +list.map(x=>`<option ${x===cur?"selected":""}>${esc(x)}</option>`).join("")
-        +`<option value="__autre" ${cur&&!inList?"selected":""}>Autre (préciser)…</option>`;
-      lb.style.display=(cur&&!inList)?"block":"none";
-      if(cur&&!inList) lb.value=cur;
-      el.onchange=()=>{ lb.style.display=el.value==="__autre"?"block":"none"; };
+  window.fillLoc = function () {
+    const pref = $("e_pref").value;
+    const mk = (sel, libre, list, cur) => {
+      const el = $(sel),
+        lb = $(libre);
+      const inList = cur && list.includes(cur);
+      el.innerHTML =
+        '<option value="">— Non précisée —</option>' +
+        list.map((x) => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("") +
+        `<option value="__autre" ${cur && !inList ? "selected" : ""}>Autre (préciser)…</option>`;
+      lb.style.display = cur && !inList ? "block" : "none";
+      if (cur && !inList) lb.value = cur;
+      el.onchange = () => {
+        lb.style.display = el.value === "__autre" ? "block" : "none";
+      };
     };
-    mk("e_sp","e_sp_libre",SOUS_PREFS[pref]||[], c?c.sousPref:"");
-    mk("e_commune","e_commune_libre",COMMUNES[pref]||[], c?c.commune:"");
+    mk("e_sp", "e_sp_libre", SOUS_PREFS[pref] || [], idDraft ? idDraft.sousPref : c ? c.sousPref : "");
+    mk("e_commune", "e_commune_libre", COMMUNES[pref] || [], idDraft ? idDraft.commune : c ? c.commune : "");
     majVague();
   };
-  fillPref();
-  if(typeof uiEmpreinte==="function") uiEmpreinte("fpBox", c&&c.empreinte);
-  const locVal=(sel,libre)=>{ const v=$(sel).value; return v==="__autre"?$(libre).value.trim():v; };
-  let photoData = c?c.photo||null:null;
-  $("phFile").addEventListener("change",e=>{
-    const f=e.target.files[0]; if(!f) return;
-    const r=new FileReader();
-    r.onload=()=>{
-      const img=new Image();
-      img.onload=()=>{
-        try{
-          const MAX=300, k=Math.min(1, MAX/Math.max(img.width,img.height));
-          const cv=document.createElement("canvas");
-          cv.width=Math.max(1,Math.round(img.width*k)); cv.height=Math.max(1,Math.round(img.height*k));
-          cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
-          const out=cv.toDataURL("image/jpeg",0.82);
-          photoData = out && out.length>50 ? out : r.result;
-        }catch(err){ photoData=r.result; }
-        $("phBox").innerHTML=`<img src="${photoData}">`;
+
+  if (step >= 2) fillPref();
+  if (step === 1 || step === 2) {
+    if (typeof uiEmpreinte === "function") uiEmpreinte("fpBox", ENR_DRAFT.empreinte || (c && c.empreinte));
+  }
+
+  window._enrPhotoData = ENR_DRAFT.photo != null ? ENR_DRAFT.photo : c ? c.photo || null : null;
+  const phFile = $("phFile");
+  if (phFile) {
+    phFile.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const MAX = 300,
+              k = Math.min(1, MAX / Math.max(img.width, img.height));
+            const cv = document.createElement("canvas");
+            cv.width = Math.max(1, Math.round(img.width * k));
+            cv.height = Math.max(1, Math.round(img.height * k));
+            cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+            const out = cv.toDataURL("image/jpeg", 0.82);
+            window._enrPhotoData = out && out.length > 50 ? out : r.result;
+          } catch (err) {
+            window._enrPhotoData = r.result;
+          }
+          $("phBox").innerHTML = `<img src="${window._enrPhotoData}">`;
+        };
+        img.onerror = () => {
+          window._enrPhotoData = r.result;
+          $("phBox").innerHTML = `<img src="${window._enrPhotoData}">`;
+        };
+        img.src = r.result;
       };
-      img.onerror=()=>{ photoData=r.result; $("phBox").innerHTML=`<img src="${photoData}">`; };
-      img.src=r.result;
-    };
-    r.readAsDataURL(f);
-  });
-  window.submitEnr = function(){
-    if(sansZone){ toast("Impossible d'enregistrer : votre zone géographique n'est pas paramétrée."); return; }
-    if(!$("e_nom").value.trim()||!$("e_prenom").value.trim()){ toast("Le nom et le prénom sont obligatoires."); return; }
-    if(!$("e_vague").value.trim()){ toast("La vague d'enregistrement est obligatoire — elle permet le suivi jusqu'à la formation."); return; }
-    const prefVal=$("e_pref").value;
-    if(lock&&regProfil&&regionOf(prefVal)!==regProfil){ toast("La préfecture doit appartenir à votre région de travail ("+regionLabel(regProfil)+")."); return; }
-    const fpBox=$("fpBox");
-    const d={
-      nom:$("e_nom").value.trim().toUpperCase(), prenom:$("e_prenom").value.trim(), alias:$("e_alias").value.trim(),
-      sexe:$("e_sexe").value, dn:$("e_dn").value, ln:$("e_ln").value.trim(), nat:$("e_nat").value.trim(), tel:$("e_tel").value.trim(),
-      fam:$("e_fam").value, prefecture:prefVal, sousPref:locVal("e_sp","e_sp_libre"), commune:locVal("e_commune","e_commune_libre"), site:$("e_site").value.trim(), vague:$("e_vague").value.trim(),
-      groupe:$("e_grp").value, grade:$("e_grade").value.trim(), annees:$("e_annees").value, zone:$("e_zone").value.trim(),
-      souhait:$("e_souhait").value, instr:$("e_instr").value, obs:$("e_obs").value.trim(), photo:photoData,
-      empreinte:fpBox&&typeof fpBox.getEmpreinte==="function"?fpBox.getEmpreinte():(c&&c.empreinte)||null
-    };
-    if(c){ Object.assign(c,d); log("Modification dossier",`${c.num} — ${c.nom} ${c.prenom}`); toast("Dossier mis à jour."); go("fiche",c.id); }
-    else{
-      const nc = Object.assign({ id:"c"+Date.now(), num:numDossier(), statut:"enregistre", creele:new Date().toISOString(), agent:CUR.login,
-        desarmement:null, demobilisation:null, reintMil:null, reintSocio:null, fin:null, abandon:null }, d);
+      r.readAsDataURL(f);
+    });
+  }
+
+  const locVal = (sel, libre) => {
+    const v = $(sel).value;
+    return v === "__autre" ? $(libre).value.trim() : v;
+  };
+
+  window.submitEnr = function () {
+    if (sansZone) {
+      toast("Impossible d'enregistrer : votre zone géographique n'est pas paramétrée.");
+      return;
+    }
+    if (ENR_STEP === 2) enrSaveDraftStep2();
+    if (ENR_STEP === 3 && !ENR_DRAFT.identity) enrSaveDraftStep2();
+    const id = ENR_DRAFT.identity;
+    if (ENR_STEP < 2 && !id) {
+      toast("Complétez d'abord l'écran identité & localisation.");
+      enrGoStep(2);
+      return;
+    }
+    const nom = id ? id.nom : $("e_nom").value.trim().toUpperCase();
+    const prenom = id ? id.prenom : $("e_prenom").value.trim();
+    if (!nom || !prenom) {
+      toast("Le nom et le prénom sont obligatoires.");
+      enrGoStep(2);
+      return;
+    }
+    const vague = id ? id.vague : $("e_vague").value.trim();
+    if (!vague) {
+      toast("La vague d'enregistrement est obligatoire.");
+      enrGoStep(2);
+      return;
+    }
+    const prefVal = id ? id.prefecture : $("e_pref").value;
+    if (lock && regProfil && regionOf(prefVal) !== regProfil) {
+      toast("La préfecture doit appartenir à votre région de travail (" + regionLabel(regProfil) + ").");
+      return;
+    }
+    const fpBox = $("fpBox");
+    const photoData =
+      window._enrPhotoData != null
+        ? window._enrPhotoData
+        : ENR_DRAFT.photo != null
+          ? ENR_DRAFT.photo
+          : c && c.photo
+            ? c.photo
+            : null;
+    const empreinte =
+      ENR_DRAFT.empreinte ||
+      (fpBox && typeof fpBox.getEmpreinte === "function" ? fpBox.getEmpreinte() : null) ||
+      (c && c.empreinte) ||
+      null;
+
+    const d = id
+      ? Object.assign({}, id, { nom, prenom, vague, photo: photoData, empreinte })
+      : {
+          nom,
+          prenom,
+          alias: $("e_alias").value.trim(),
+          sexe: $("e_sexe").value,
+          dn: $("e_dn").value,
+          ln: $("e_ln").value.trim(),
+          nat: $("e_nat").value.trim(),
+          tel: $("e_tel").value.trim(),
+          fam: $("e_fam").value,
+          prefecture: prefVal,
+          sousPref: locVal("e_sp", "e_sp_libre"),
+          commune: locVal("e_commune", "e_commune_libre"),
+          site: $("e_site").value.trim(),
+          vague,
+          obs: $("e_obs").value.trim(),
+          photo: photoData,
+          empreinte,
+        };
+
+    const needDes = !c && showDes && ENR_STEP === 3;
+    let desData = null;
+    if (needDes) {
+      desData = typeof readDesarmementForm === "function" ? readDesarmementForm(true) : null;
+      if (!desData) {
+        toast("Ajoutez au moins une arme ou un lot de munitions au procès-verbal.");
+        return;
+      }
+    }
+
+    if (c) {
+      Object.assign(c, d);
+      if (!c.groupe) c.groupe = c.groupe || "Autre";
+      if (!c.souhait) c.souhait = c.souhait || "Indécis";
+      if (!c.instr) c.instr = c.instr || "Aucun";
+      log("Modification dossier", `${c.num} — ${c.nom} ${c.prenom}`);
+      toast("Dossier mis à jour.");
+      go("fiche", c.id);
+    } else {
+      const nc = Object.assign(
+        {
+          id: "c" + Date.now(),
+          num: numDossier(),
+          statut: desData ? "desarme" : "enregistre",
+          creele: new Date().toISOString(),
+          agent: CUR.login,
+          desarmement: desData,
+          demobilisation: null,
+          reintMil: null,
+          reintSocio: null,
+          fin: null,
+          abandon: null,
+          groupe: "Autre",
+          grade: "",
+          annees: "",
+          zone: "",
+          souhait: "Indécis",
+          instr: "Aucun",
+        },
+        d
+      );
+      if (desData && !showDes) {
+        toast("Désarmement non saisi — dossier ouvert au statut enregistré.");
+      }
+      if (!desData && showDes && ENR_STEP < 3) {
+        toast("Le désarmement doit être saisi dans la foulée — complétez l'étape 3.");
+        enrGoStep(3);
+        return;
+      }
       DB.combattants.push(nc);
-      log("Enregistrement",`Ouverture du dossier ${nc.num} — ${nc.nom} ${nc.prenom} (${nc.groupe}, ${nc.vague})`);
-      toast(`Dossier ${nc.num} ouvert.`); go("fiche",nc.id);
+      log(
+        "Enregistrement",
+        desData
+          ? `Dossier ${nc.num} — ${nc.nom} ${nc.prenom} (enregistré et désarmé)`
+          : `Ouverture du dossier ${nc.num} — ${nc.nom} ${nc.prenom} (${nc.vague})`
+      );
+      if (desData) log("Désarmement", `${nc.num} — procès-verbal saisi à l'enregistrement`);
+      toast(desData ? `Dossier ${nc.num} ouvert et désarmé.` : `Dossier ${nc.num} ouvert.`);
+      ENR_DRAFT = { photo: null, empreinte: null, identity: null };
+      ENR_STEP = 1;
+      go("fiche", nc.id);
     }
   };
-  $("fEnr").addEventListener("submit",e=>{ e.preventDefault(); submitEnr(); });
-}
 
-
-/* module: operations/attente.js — PNDDRR engine (classic globals) */
-/* Aptitude, médecine et kits : structure validée, contenu en attente des documents de référence. */
-const OPERATION_ATTENTE = {
-  aptitude:{
-    titre:"Aptitude",
-    intro:"Ce module accueillera le contrôle d'aptitude des personnes enregistrées (critères médicaux et opérationnels).",
-    docs:"grille d'aptitude, critères d'admission et circuit de validation"
-  },
-  medecine:{
-    titre:"Médecine",
-    intro:"Ce module accueillera le suivi médical lié aux opérations de désarmement (consultations, soins, orientation sanitaire).",
-    docs:"protocole médical, fiches de consultation et listes de médicaments"
-  },
-  kits:{
-    titre:"Distribution de kits",
-    intro:"Ce module accueillera la remise des kits aux personnes prises en charge (composition, stocks, accusés de réception).",
-    docs:"nomenclature des kits, seuils de stock et bordereaux de distribution"
-  }
-};
-function rOperationAttente(kind){
-  const m=OPERATION_ATTENTE[kind]||OPERATION_ATTENTE.aptitude;
-  $("view").innerHTML = `
-  <div class="panel"><div class="ph"><h3>${esc(m.titre)}</h3><span class="muted small">Opération</span></div>
-  <div class="pb">
-    <p>${esc(m.intro)}</p>
-    <p class="small muted" style="margin-top:10px">Le contenu détaillé sera saisi dès réception des documents de référence (${esc(m.docs)}). La rubrique est déjà en place dans le menu pour ne pas retarder la structuration validée.</p>
-  </div></div>`;
+  $("fEnr").addEventListener("submit", (e) => {
+    e.preventDefault();
+    submitEnr();
+  });
 }
 
 /* module: biometrie/lecteur.js — PNDDRR engine (classic globals) */
@@ -885,6 +1102,1133 @@ function uiEmpreinte(boxId, initial){
   box.getEmpreinte=()=>box._fp||null;
 }
 chargerLecteurVendor();
+
+/* module: combattants/fiche.js — PNDDRR engine (classic globals) */
+/* ================= FICHE INDIVIDUELLE ================= */
+function stepsHtml(c){
+  const order=["enregistre","desarme","demobilise","reint","reintegre"];
+  const cur = c.statut==="reintegration_militaire"||c.statut==="reintegration_socio" ? "reint" : c.statut;
+  const idx = c.statut==="abandon" ? -1 : order.indexOf(cur);
+  const lbl = {enregistre:"1. Enregistrement",desarme:"2. Désarmement",demobilise:"3. Démobilisation",reint:"4. Réintégration",reintegre:"5. Réintégré"};
+  let h = order.map((s,i)=>`<div class="step click ${idx>i?"done":idx===i?"now":""}" title="Cliquer pour le détail de cette étape" onclick="stepInfo('${c.id}','${s}')">${lbl[s]}</div>`).join("");
+  if(c.statut==="abandon") h+=`<div class="step ab click" title="Cliquer pour le détail" onclick="stepInfo('${c.id}','abandon')">Abandon</div>`;
+  return `<div class="steps">${h}</div>`;
+}
+function stepInfo(id, step){
+  const c=DB.combattants.find(x=>x.id===id); if(!c) return;
+  const order=["enregistre","desarme","demobilise","reint","reintegre"];
+  const cur = c.statut==="reintegration_militaire"||c.statut==="reintegration_socio" ? "reint" : c.statut;
+  const idx = c.statut==="abandon" ? -1 : order.indexOf(cur);
+  const i=order.indexOf(step);
+  const etat = step==="abandon" ? "" : idx>i?`<span class="badge st-reintegre">Étape accomplie</span>` : idx===i?`<span class="badge st-demobilise">Étape en cours</span>` : `<span class="badge st-enregistre">Étape à venir</span>`;
+  const L=(k,v)=>`<tr><td style="width:210px;color:var(--muted);font-weight:600">${k}</td><td>${v}</td></tr>`;
+  const T=rows=>`<table style="background:transparent">${rows.join("")}</table>`;
+  let titre="", corps="", pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button>`;
+  if(step==="enregistre"){
+    titre="1. Enregistrement";
+    corps=T([L("Dossier ouvert le",fmtD(c.creele.slice(0,10))+" par "+esc(c.agent)),
+      L("Vague d'enregistrement",c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"),
+      L("Localisation",`${esc(c.prefecture)} (région ${regionOf(c.prefecture)})${c.sousPref?" — "+esc(c.sousPref):""}${c.commune?" — "+esc(c.commune):""}${c.site?" · site : "+esc(c.site):""}`),
+      L("Groupe armé d'origine",esc(c.groupe)+(c.grade?" · "+esc(c.grade):"")),
+      L("Souhait exprimé",esc(c.souhait))]);
+  } else if(step==="desarme"){
+    titre="2. Désarmement";
+    corps=c.desarmement?T([L("Désarmé le",fmtD(c.desarmement.date)+" à "+esc(c.desarmement.lieu)),
+      L("Matériel réceptionné par",esc(c.desarmement.agent)),
+      L("Armes remises",c.desarmement.armes.length?c.desarmement.armes.map(a=>`${esc(a.type)}${a.serie?" ("+esc(a.serie)+")":""} — ${esc(a.etat)}`).join("<br>"):"Aucune"),
+      L("Munitions / explosifs",(c.desarmement.munitions||[]).length?c.desarmement.munitions.map(m=>`${fmtN(m.qte)} ${esc(m.unite)}${m.nature?" — "+esc(m.nature):""}`).join("<br>"):"—")])
+      :`<p class="muted">Le désarmement n'a pas encore eu lieu. Il consiste en la remise des armes et munitions contre attestation, et fait passer le dossier au statut « Désarmé ».</p>`;
+    if(c.desarmement) pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn sec" onclick="closeModal();printAttestation('${c.id}')">Attestation de désarmement</button>`;
+  } else if(step==="demobilise"){
+    titre="3. Démobilisation";
+    corps=c.demobilisation?T([L("Prononcée le",fmtD(c.demobilisation.date)+" à "+esc(c.demobilisation.lieu)),
+      L("Carte de démobilisé",`<b>${esc(c.demobilisation.carte)}</b>`)])
+      :`<p class="muted">La démobilisation n'a pas encore été prononcée. Elle acte la sortie officielle du groupe armé et donne lieu à la délivrance d'une carte de démobilisé (l'orientation en réintégration reste possible dès le désarmement).</p>`;
+    if(c.demobilisation) pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn sec" onclick="closeModal();printCarte('${c.id}')">Carte de démobilisé</button>`;
+  } else if(step==="reint"){
+    titre="4. Réintégration";
+    const r=reintOf(c);
+    if(!r) corps=`<p class="muted">Aucune orientation prononcée pour l'instant. L'ex-combattant sera orienté vers la voie militaire (incorporation dans les forces) ou socio-économique (formation professionnelle et appui à l'installation).</p>`;
+    else{
+      const rows=[L("Voie",c.reintMil?"Militaire":"Socio-économique"),L("Orientation prononcée le",fmtD(r.date))];
+      if(c.reintMil){ rows.push(L("Corps / unité",esc(c.reintMil.corps)+(c.reintMil.unite?" · "+esc(c.reintMil.unite):"")),L("Matricule",esc(c.reintMil.matricule)||"—"),L("Formation initiale",esc(c.reintMil.formation)||"—")); }
+      else{ rows.push(L("Filière",esc(c.reintSocio.filiere)+(c.reintSocio.centre?" · "+esc(c.reintSocio.centre):"")),L("Kit / appui",(c.reintSocio.kit?"Kit remis":"Kit non remis")+(c.reintSocio.appui?" · "+fmtN(c.reintSocio.appui)+" FCFA":"")),L("Visites de suivi",String((c.reintSocio.visites||[]).length))); }
+      if(r.promo) rows.push(L("Promotion / vague",`<span class="tag">${esc(r.promo)}</span>`));
+      const [bF,bV]=jalonBadge(c);
+      rows.push(L("Formation",bF+(r.formNote?` <span class="small muted">${esc(r.formNote)}</span>`:"")),L("Intégration à la vie "+(c.reintMil?"militaire":"civile"),bV+(r.vieDetail?` <span class="small muted">${esc(r.vieDetail)}</span>`:"")));
+      corps=T(rows);
+    }
+  } else if(step==="reintegre"){
+    titre="5. Réintégré";
+    corps=c.statut==="reintegre"?T([L("Parcours achevé le",fmtD(c.fin)),
+      L("Situation",c.reintMil?"Intégré à la vie militaire"+(reintOf(c).vieDetail?" — "+esc(reintOf(c).vieDetail):""):"Intégré à la vie civile"+(reintOf(c).vieDetail?" — "+esc(reintOf(c).vieDetail):""))])
+      :`<p class="muted">La clôture interviendra au terme du parcours de réintégration, une fois la formation achevée et l'intégration à la vie militaire ou civile confirmée.</p>`;
+    if(c.statut==="reintegre") pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn sec" onclick="closeModal();printParcours('${c.id}')">Relevé du parcours</button>`;
+  } else if(step==="abandon"){
+    titre="Abandon du processus";
+    corps=T([L("Déclaré le",fmtD(c.abandon.date)),L("Motif",esc(c.abandon.motif)||"—")]);
+  }
+  openModal(`${titre} — dossier ${c.num}`, `<div style="margin-bottom:10px">${etat}</div>${corps}`, pied);
+}
+function parcoursEvents(c){
+  const ev=[];
+  const add=(date,titre,detail,cls)=>{ if(date) ev.push({date:String(date).slice(0,10),titre,detail,cls}); };
+  add(c.creele,"Enregistrement (désarmement — étape 1)",`Dossier ${c.num} ouvert par ${c.agent}${c.vague?" · vague "+c.vague:""}${c.site?" · site de "+c.site:""}`,"enregistre");
+  if(c.desarmement){
+    const d=c.desarmement, nm=(d.munitions||[]).length;
+    add(d.date,"Désarmement — remise du matériel",`${d.armes.length} arme(s)${nm?` et ${nm} lot(s) de munitions`:""} réceptionnée(s) à ${d.lieu}${d.armes.length?" : "+d.armes.map(a=>a.type+(a.serie?" ("+a.serie+")":"")).join(", "):""}`,"desarme");
+  }
+  if(c.demobilisation) add(c.demobilisation.date,"Démobilisation prononcée",`Carte ${c.demobilisation.carte} délivrée à ${c.demobilisation.lieu}`,"demobilise");
+  if(c.reintMil) add(c.reintMil.date,"Orientation — réintégration militaire",`${c.reintMil.corps}${c.reintMil.unite?" · "+c.reintMil.unite:""}${c.reintMil.matricule?" · matricule "+c.reintMil.matricule:""}${c.reintMil.promo?" · promotion "+c.reintMil.promo:""}${c.reintMil.formation?" · "+c.reintMil.formation:""}`,"reintegration_militaire");
+  if(c.reintSocio){
+    add(c.reintSocio.date,"Orientation — réintégration socio-économique",`Filière ${c.reintSocio.filiere}${c.reintSocio.centre?" · "+c.reintSocio.centre:""}${c.reintSocio.duree?" · "+c.reintSocio.duree:""}${c.reintSocio.promo?" · promotion "+c.reintSocio.promo:""}`,"reintegration_socio");
+    if(c.reintSocio.kit) add(c.reintSocio.kitDate||c.reintSocio.date,"Kit de réinstallation remis","","reintegration_socio");
+    if(c.reintSocio.appui) add(c.reintSocio.date,"Appui financier accordé",fmtN(c.reintSocio.appui)+" FCFA","reintegration_socio");
+    (c.reintSocio.visites||[]).forEach(v=>add(v.date,"Visite de suivi",`Appréciation : ${v.appr}${v.obs?" — "+v.obs:""} (${v.agent})`,"reintegration_socio"));
+  }
+  const r=reintOf(c);
+  if(r){
+    if(r.formFin) add(r.formFin,"Fin de la formation "+(c.reintMil?"initiale":"professionnelle"),r.formNote||"","reintegre");
+    if(r.vieDate) add(r.vieDate,c.reintMil?"Intégration à la vie militaire":"Intégration à la vie civile",r.vieDetail||"","reintegre");
+  }
+  if(c.rapatriement) add(c.rapatriement.date,"Rapatriement vers le pays d'origine",`${c.rapatriement.pays}${c.rapatriement.convoi?" · "+c.rapatriement.convoi:""}${c.rapatriement.autorites?" · remise : "+c.rapatriement.autorites:""}`,"rapatrie");
+  if(c.fin&&c.statut!=="rapatrie") add(c.fin,"Clôture — réintégration achevée","Fin du parcours de réintégration","reintegre");
+  if(c.abandon) add(c.abandon.date,"Abandon du processus",c.abandon.motif||"","abandon");
+  return ev.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function rFiche(id){
+  const c = DB.combattants.find(x=>x.id===id); if(!c){ go("registre"); return; }
+  FICHE_ID=id;
+  $("pageTitle").textContent = `Dossier ${c.num}`;
+  const A = hasPerm("enregistrer");
+  const rowsInfo = [
+    ["Nom & prénom(s)", `${esc(c.nom)} ${esc(c.prenom)}${c.alias?` — alias « ${esc(c.alias)} »`:""}`],
+    ["Sexe / âge", `${c.sexe==="M"?"Masculin":"Féminin"} · ${age(c.dn)} ans (né(e) le ${fmtD(c.dn)} à ${esc(c.ln)||"—"})${estMineur(c)?' <span class="badge" style="background:#FCEBD8;color:#9A5B00" title="Enfant associé aux forces et groupes armés — la voie militaire est bloquée">Mineur (EAFGA)</span>':""}`],
+    ["Nationalité / téléphone", `${esc(c.nat)} · ${esc(c.tel)||"—"}`],
+    ["Situation familiale / instruction", `${esc(c.fam)} · ${esc(c.instr)}`],
+    ["Localisation", `${esc(c.prefecture)} (région ${regionOf(c.prefecture)})${c.sousPref?" — S/P "+esc(c.sousPref):""}${c.commune?" — commune de "+esc(c.commune):""}${c.site?" · Site : "+esc(c.site):""}`],
+    ["Vague d'enregistrement", c.vague?esc(c.vague):"—"],
+    ["Groupe armé d'origine", `${esc(c.groupe)}${c.grade?" · "+esc(c.grade):""}${c.annees?" · "+c.annees+" an(s)":""}`],
+    ["Zone d'opération", esc(c.zone)||"—"],
+    ["Souhait de réintégration", esc(c.souhait)],
+    ["Observations", esc(c.obs)||"—"],
+    ["Dossier ouvert", `${fmtD(c.creele.slice(0,10))} par ${esc(c.agent)}`]
+  ];
+  let h = stepsHtml(c);
+  h += `<div class="panel"><div class="ph"><h3>Identité — <span class="badge st-${c.statut}">${STATUTS[c.statut].lbl}</span></h3>
+    <div style="display:flex;gap:7px">
+      ${A?`<button class="btn sm sec" onclick="rNouveau('${c.id}')">Modifier</button>`:""}
+      <button class="btn sm sec" onclick="printFiche('${c.id}')">Imprimer la fiche</button>
+      ${hasPerm("cloturer")&&c.statut!=="abandon"&&c.statut!=="reintegre"?`<button class="btn sm danger" onclick="markAbandon('${c.id}')">Déclarer abandon</button>`:""}
+    </div></div>
+    <div class="pb" style="display:flex;gap:18px">
+      <div class="photo-box">${c.photo?`<img src="${c.photo}">`:"Photo"}</div>
+      <table style="background:transparent">${rowsInfo.map(r=>`<tr><td style="width:240px;color:var(--muted);font-weight:600">${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>
+    </div></div>`;
+
+  /* --- Étape désarmement --- */
+  h += `<div class="panel"><div class="ph"><h3>Étape 2 — Désarmement</h3>${
+    c.statut==="enregistre"&&hasPerm("desarmer")?`<button class="btn sm" onclick="mDesarmement('${c.id}')">Procéder au désarmement</button>`:
+    c.desarmement?`<button class="btn sm sec" onclick="printAttestation('${c.id}')">Attestation de désarmement</button>`:""
+  }</div><div class="pb${c.desarmement?" nopad":""}">${
+    c.desarmement ? `<table><thead><tr><th>Type</th><th>Marque / modèle</th><th>Calibre</th><th>N° de série</th><th>État</th><th>Munitions</th></tr></thead><tbody>${
+      c.desarmement.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${esc(a.mun)||"—"}</td></tr>`).join("")
+    }</tbody></table>${(c.desarmement.munitions||[]).length?`<div style="padding:8px 16px 0"><b class="small" style="color:var(--teal-dark);text-transform:uppercase">Munitions et explosifs</b></div>
+    <table><thead><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th></tr></thead><tbody>${
+      c.desarmement.munitions.map(m=>`<tr><td>${esc(m.nature)||"—"}</td><td>${fmtN(m.qte)}</td><td>${esc(m.unite)}</td><td class="small">${esc(m.obs)||"—"}</td></tr>`).join("")
+    }</tbody></table>`:""}<div style="padding:10px 16px" class="small muted">Désarmé le ${fmtD(c.desarmement.date)} à ${esc(c.desarmement.lieu)} — matériel réceptionné par ${esc(c.desarmement.agent)}.</div>`
+    : `<span class="muted">En attente — l'intéressé n'a pas encore remis d'armement.</span>`
+  }</div></div>`;
+
+  /* --- Étape démobilisation --- */
+  h += `<div class="panel"><div class="ph"><h3>Étape 3 — Démobilisation</h3>${
+    c.statut==="desarme"&&hasPerm("demobiliser")?`<button class="btn sm" onclick="mDemobilisation('${c.id}')">Prononcer la démobilisation</button>`:
+    c.demobilisation?`<button class="btn sm sec" onclick="printCarte('${c.id}')">Carte de démobilisé</button>`:""
+  }</div><div class="pb">${
+    c.demobilisation ? `Démobilisé le <b>${fmtD(c.demobilisation.date)}</b> — carte n° <span class="tag">${c.demobilisation.carte}</span> délivrée à ${esc(c.demobilisation.lieu)}.`
+    : `<span class="muted">En attente — la démobilisation peut être prononcée après la remise des armes${["reintegration_militaire","reintegration_socio"].includes(c.statut)?" (l'intéressé a été orienté directement en réintégration)":""}.</span>`
+  }</div></div>`;
+
+  /* --- Étape réintégration --- */
+  h += `<div class="panel"><div class="ph"><h3>Étape 4 — Réintégration</h3>${
+    (c.statut==="demobilise"||c.statut==="desarme")&&hasPerm("orienter")?`<span style="display:flex;gap:7px"><button class="btn sm" onclick="mReintMil('${c.id}')">Orientation militaire</button><button class="btn sm sec" onclick="mReintSocio('${c.id}')">Orientation socio-économique</button><button class="btn sm ghost" title="Combattant étranger : retour vers le pays d'origine" onclick="mRapatriement('${c.id}')">Rapatriement</button></span>`:""
+  }</div><div class="pb">`;
+  if(c.reintMil){
+    const r=c.reintMil;
+    h+=`<b style="color:#5A2E96">Réintégration militaire</b><table style="background:transparent;margin-top:6px">
+      <tr><td style="width:240px;color:var(--muted);font-weight:600">Corps d'incorporation</td><td>${esc(r.corps)}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Unité d'affectation</td><td>${esc(r.unite)||"—"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Matricule</td><td>${r.matricule?`<span class="tag">${esc(r.matricule)}</span>`:"—"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Date d'incorporation</td><td>${fmtD(r.date)}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Formation initiale</td><td>${esc(r.formation)||"—"}</td></tr></table>
+    ${jalonsFiche(c)}`;
+  } else if(c.reintSocio){
+    const r=c.reintSocio;
+    h+=`<b style="color:#8A5400">Réintégration socio-économique</b><table style="background:transparent;margin-top:6px">
+      <tr><td style="width:240px;color:var(--muted);font-weight:600">Filière choisie</td><td>${esc(r.filiere)}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Centre / structure de formation</td><td>${esc(r.centre)||"—"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Durée de formation</td><td>${esc(r.duree)||"—"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Kit de réinstallation</td><td>${r.kit?"Remis le "+fmtD(r.kitDate):"Non remis"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Appui financier</td><td>${r.appui?fmtN(r.appui)+" FCFA":"—"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Début du parcours</td><td>${fmtD(r.date)}</td></tr></table>
+    ${jalonsFiche(c)}
+      <h3 style="font-size:13px;color:var(--teal-dark);margin:14px 0 8px;text-transform:uppercase">Visites de suivi (${r.visites.length})</h3>
+      ${r.visites.length?`<table><thead><tr><th>Date</th><th>Agent</th><th>Appréciation</th><th>Observations</th></tr></thead><tbody>${
+        r.visites.map(v=>`<tr><td>${fmtD(v.date)}</td><td>${esc(v.agent)}</td><td>${esc(v.appr)}</td><td>${esc(v.obs)}</td></tr>`).join("")
+      }</tbody></table>`:`<span class="muted small">Aucune visite de suivi enregistrée.</span>`}
+      ${(c.statut==="reintegration_socio"&&hasPerm("visites"))?`<div style="margin-top:10px"><button class="btn sm sec" onclick="mVisite('${c.id}')">Ajouter une visite de suivi</button></div>`:""}`;
+  } else if(c.rapatriement){
+    const r=c.rapatriement;
+    h+=`<b style="color:#274B8F">Rapatriement — combattant étranger</b><table style="background:transparent;margin-top:6px">
+      <tr><td style="width:240px;color:var(--muted);font-weight:600">Pays de retour</td><td>${esc(r.pays)}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Rapatrié le</td><td>${fmtD(r.date)}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Convoi / point de passage</td><td>${esc(r.convoi)||"—"}</td></tr>
+      <tr><td style="color:var(--muted);font-weight:600">Remise aux autorités</td><td>${esc(r.autorites)||"—"}</td></tr>
+      ${r.obs?`<tr><td style="color:var(--muted);font-weight:600">Observations</td><td>${esc(r.obs)}</td></tr>`:""}</table>`;
+  } else {
+    h+=`<span class="muted">En attente — l'orientation est possible dès le désarmement${c.souhait&&c.souhait!=="Indécis"?` (souhait exprimé : ${esc(c.souhait)})`:""}.</span>`;
+  }
+  h+=`</div></div>`;
+
+  /* --- Clôture --- */
+  h += `<div class="panel"><div class="ph"><h3>Étape 5 — Clôture du parcours</h3>${
+    ["reintegration_militaire","reintegration_socio"].includes(c.statut)&&hasPerm("cloturer")?`<button class="btn sm" onclick="markReintegre('${c.id}')">Déclarer la réintégration achevée</button>`:""
+  }</div><div class="pb">${
+    c.statut==="rapatrie"?`<b style="color:#274B8F">Rapatrié le ${fmtD(c.fin)}</b> vers ${esc(c.rapatriement.pays)} — dossier clos au titre du rapatriement.`
+    : c.statut==="reintegre"?`<b style="color:var(--ok)">Parcours achevé le ${fmtD(c.fin)}.</b> L'intéressé est considéré comme pleinement réintégré.`
+    : c.statut==="abandon"?`<b style="color:var(--danger)">Abandon déclaré le ${fmtD(c.abandon.date)}.</b> Motif : ${esc(c.abandon.motif)}`
+    : `<span class="muted">Le dossier sera clôturé au terme du parcours de réintégration.</span>`
+  }</div></div>`;
+
+  /* --- Chronologie complète --- */
+  const ev=parcoursEvents(c);
+  h += `<div class="panel"><div class="ph"><h3>Parcours complet — du désarmement à la fin de la réintégration (${ev.length} étape(s))</h3>
+    <button class="btn sm sec" onclick="printParcours('${c.id}')">Imprimer le parcours</button></div>
+    <div class="pb"><div class="chrono">${
+      ev.map(e=>`<div class="ch-item"><span class="ch-dot st-${e.cls}"></span>
+        <div class="ch-date">${fmtD(e.date)}</div>
+        <div class="ch-body"><b>${esc(e.titre)}</b>${e.detail?`<div class="small muted">${esc(e.detail)}</div>`:""}</div></div>`).join("")
+    }</div></div></div>`;
+  $("view").innerHTML = h;
+}
+function printParcours(id){
+  const c=DB.combattants.find(x=>x.id===id); const ev=parcoursEvents(c);
+  doPrint(docWrap(`${docEntete("Relevé chronologique du parcours DDR")}
+    <h2 class="titre">Parcours complet — dossier ${c.num}</h2>
+    <p><b>${esc(c.nom)} ${esc(c.prenom)}</b>${c.alias?` (alias « ${esc(c.alias)} »)`:""}, ${c.sexe==="M"?"né":"née"} le ${fmtD(c.dn)}, groupe d'origine ${esc(c.groupe)}, ${esc(c.prefecture)}${c.vague?", vague "+esc(c.vague):""}. Statut actuel : <b>${STATUTS[c.statut].lbl}</b>. Relevé arrêté au ${new Date().toLocaleDateString("fr-FR")}.</p>
+    <table class="dt"><tr><th style="width:90px">Date</th><th>Étape du processus</th><th>Détail</th></tr>${
+      ev.map(e=>`<tr><td>${fmtD(e.date)}</td><td><b>${esc(e.titre)}</b></td><td>${esc(e.detail)||"—"}</td></tr>`).join("")}</table>
+    <div class="sig"><div class="c"></div><div class="c">Fait à ${esc(cfg("villeSignature")||"Bangui")}, le ${new Date().toLocaleDateString("fr-FR")}<br>Pour le PNDDRR<div class="ligne">${esc(CUR.nom)}</div></div></div>`));
+  log("Impression",`Relevé de parcours ${c.num}`);
+}
+
+/* ---------- Actions du circuit ---------- */
+const UNITES_MUN=["cartouches","chargeurs","bandes","caisses","grenades","roquettes","obus","kg d'explosif","autre"];
+function munRow(){
+  return `<tr class="munRow"><td><input class="m_nature" placeholder="Nature / calibre (ex. : 7,62×39 mm)"></td>
+  <td><input class="m_qte" type="number" min="0" style="width:90px" placeholder="Qté"></td>
+  <td><select class="m_unite">${UNITES_MUN.map(u=>`<option>${u}</option>`).join("")}</select></td>
+  <td><input class="m_obs" placeholder="Observations"></td>
+  <td><button type="button" class="btn sm ghost" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
+}
+function armeRow(i){
+  return `<tr class="armeRow"><td><select class="a_type">${TYPES_ARMES.map(t=>`<option>${t}</option>`).join("")}</select></td>
+  <td><input class="a_marque" placeholder="Marque / modèle"></td><td><input class="a_calibre" placeholder="Calibre" style="width:90px"></td>
+  <td><input class="a_serie" placeholder="N° série"></td>
+  <td><select class="a_etat"><option>Fonctionnelle</option><option>Défectueuse</option><option>Hors d'usage</option></select></td>
+  <td><input class="a_mun" placeholder="Munitions" style="width:90px"></td>
+  <td><button type="button" class="btn sm ghost" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
+}
+function mDesarmement(id){
+  openModal("Procès-verbal de désarmement", `
+    <div class="grid2"><div class="field"><label>Date de remise</label><input type="date" id="d_date" value="${today()}"></div>
+    <div class="field"><label>Lieu / site de collecte</label><input id="d_lieu"></div></div>
+    <label>Armement et matériel remis</label>
+    <table id="tArmes"><thead><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th><th>Munitions</th><th></th></tr></thead>
+    <tbody>${armeRow(0)}</tbody></table>
+    <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tArmes tbody').insertAdjacentHTML('beforeend', armeRow())">+ Ajouter une arme</button>
+    <h3 style="color:var(--teal-dark);margin:16px 0 8px;font-size:13px;text-transform:uppercase">Munitions et explosifs remis</h3>
+    <table id="tMun"><thead><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th><th></th></tr></thead>
+    <tbody></tbody></table>
+    <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tMun tbody').insertAdjacentHTML('beforeend', munRow())">+ Ajouter des munitions</button>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveDesarmement('${id}')">Valider le désarmement</button>`);
+}
+function readDesarmementForm(requireItems){
+  const tArmes=document.querySelector("#tArmes tbody");
+  if(!tArmes) return null;
+  const armes=[...document.querySelectorAll("#tArmes tbody tr")].map(tr=>({
+    type:tr.querySelector(".a_type").value, marque:tr.querySelector(".a_marque").value.trim(),
+    calibre:tr.querySelector(".a_calibre").value.trim(), serie:tr.querySelector(".a_serie").value.trim(),
+    etat:tr.querySelector(".a_etat").value, mun:tr.querySelector(".a_mun").value.trim()
+  }));
+  const munitions=[...document.querySelectorAll("#tMun tbody tr")].map(tr=>({
+    nature:tr.querySelector(".m_nature").value.trim(), qte:+tr.querySelector(".m_qte").value||0,
+    unite:tr.querySelector(".m_unite").value, obs:tr.querySelector(".m_obs").value.trim()
+  })).filter(m=>m.nature||m.qte);
+  if(requireItems&&!armes.length&&!munitions.length) return null;
+  const cRef= FICHE_ID?DB.combattants.find(x=>x.id===FICHE_ID):null;
+  return {date:($("d_date")&&$("d_date").value)||today(), lieu:($("d_lieu")&&$("d_lieu").value.trim())||(cRef&&(cRef.site||cRef.prefecture))||"", agent:CUR.nom, armes, munitions};
+}
+function saveDesarmement(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  const data=readDesarmementForm(true);
+  if(!data){ toast("Ajoutez au moins une arme ou un lot de munitions."); return; }
+  c.desarmement=data;
+  if(!c.desarmement.lieu) c.desarmement.lieu=c.site||c.prefecture;
+  c.statut="desarme";
+  log("Désarmement",`${c.num} — ${data.armes.length} arme(s) et ${data.munitions.length} lot(s) de munitions réceptionnés`);
+  closeModal(); toast("Désarmement enregistré."); rFiche(id);
+}
+function mDemobilisation(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  openModal("Démobilisation", `
+    <p class="small muted" style="margin-bottom:12px">La validation attribue automatiquement un numéro de carte de démobilisé.</p>
+    <div class="grid2"><div class="field"><label>Date de démobilisation</label><input type="date" id="dm_date" value="${today()}"></div>
+    <div class="field"><label>Lieu de délivrance</label><input id="dm_lieu" value="${esc(c.prefecture)}"></div></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveDemob('${id}')">Prononcer la démobilisation</button>`);
+}
+function saveDemob(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  c.demobilisation={date:$("dm_date").value||today(), lieu:$("dm_lieu").value.trim(), carte:numDem()};
+  c.statut="demobilise";
+  log("Démobilisation",`${c.num} — carte ${c.demobilisation.carte}`);
+  closeModal(); toast(`Carte ${c.demobilisation.carte} délivrée.`); rFiche(id);
+}
+function estMineur(c){ const a=age(c.dn); return a!=="—" && a<18; }
+function mReintMil(id){
+  const cM=DB.combattants.find(x=>x.id===id);
+  if(cM && estMineur(cM)){
+    openModal("Orientation militaire impossible — mineur (EAFGA)", `
+      <p><b>${esc(cM.nom)} ${esc(cM.prenom)}</b> a <b>${age(cM.dn)} ans</b>. Conformément aux standards du DDR et à la protection de l'enfance, un mineur (enfant associé aux forces et groupes armés — EAFGA) <b>ne peut pas être orienté vers la voie militaire</b>.</p>
+      <p class="small muted" style="margin-top:8px">Orientez ce dossier vers la voie socio-économique (scolarisation, formation, réunification familiale), en liaison avec les services de protection de l'enfance.</p>`,
+      `<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn" onclick="closeModal();mReintSocio('${cM.id}')">Orientation socio-économique</button>`);
+    return;
+  }
+  openModal("Orientation — réintégration militaire", `
+    <div class="grid2">
+    <div class="field"><label>Corps d'incorporation</label><select id="rm_corps">${CORPS.map(x=>`<option>${x}</option>`).join("")}</select></div>
+    <div class="field"><label>Unité d'affectation</label><input id="rm_unite"></div>
+    <div class="field"><label>Matricule attribué <span class="muted" style="font-weight:400">(optionnel)</span></label><input id="rm_mat" placeholder="Laissé vide en formation"></div>
+    <div class="field"><label>Date d'incorporation</label><input type="date" id="rm_date" value="${today()}"></div>
+    <div class="field"><label>Formation initiale prévue</label><input id="rm_form" placeholder="Ex. : formation commune de base — camp Kassaï"></div>
+    <div class="field"><label>Promotion / vague de formation</label><input id="rm_promo" list="promoList" value="${esc((DB.combattants.find(x=>x.id===id)||{}).vague||"")}" placeholder="Ex. : Vague 2026-A"><datalist id="promoList">${promosConnues().map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveReintMil('${id}')">Valider l'orientation</button>`);
+}
+function saveReintMil(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  c.reintMil={corps:$("rm_corps").value, unite:$("rm_unite").value.trim(), matricule:$("rm_mat").value.trim(), date:$("rm_date").value||today(), formation:$("rm_form").value.trim(), promo:$("rm_promo").value.trim()||c.vague||""};
+  c.statut="reintegration_militaire";
+  log("Réintégration militaire",`${c.num} — ${c.reintMil.corps}${c.reintMil.matricule?", matricule "+c.reintMil.matricule:""}`);
+  closeModal(); toast("Orientation militaire enregistrée."); rFiche(id);
+}
+function mReintSocio(id){
+  openModal("Orientation — réintégration socio-économique", `
+    <div class="grid2">
+    <div class="field"><label>Filière</label><select id="rs_fil">${FILIERES.map(x=>`<option>${x}</option>`).join("")}</select></div>
+    <div class="field"><label>Centre / structure de formation</label><input id="rs_centre"></div>
+    <div class="field"><label>Durée de formation</label><input id="rs_duree" placeholder="Ex. : 6 mois"></div>
+    <div class="field"><label>Début du parcours</label><input type="date" id="rs_date" value="${today()}"></div>
+    <div class="field"><label>Kit de réinstallation remis ?</label><select id="rs_kit"><option value="">Non</option><option value="1">Oui</option></select></div>
+    <div class="field"><label>Date de remise du kit</label><input type="date" id="rs_kitdate"></div>
+    <div class="field"><label>Appui financier (FCFA)</label><input type="number" min="0" id="rs_appui"></div>
+    <div class="field"><label>Promotion / vague de formation</label><input id="rs_promo" list="promoList" value="${esc((DB.combattants.find(x=>x.id===id)||{}).vague||"")}" placeholder="Ex. : Promotion Couture 2026-1"><datalist id="promoList">${promosConnues().map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveReintSocio('${id}')">Valider l'orientation</button>`);
+}
+function saveReintSocio(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  c.reintSocio={filiere:$("rs_fil").value, centre:$("rs_centre").value.trim(), duree:$("rs_duree").value.trim(),
+    date:$("rs_date").value||today(), kit:!!$("rs_kit").value, kitDate:$("rs_kitdate").value, appui:$("rs_appui").value, promo:$("rs_promo").value.trim()||c.vague||"", visites:[]};
+  c.statut="reintegration_socio";
+  log("Réintégration socio-économique",`${c.num} — filière ${c.reintSocio.filiere}`);
+  closeModal(); toast("Orientation socio-économique enregistrée."); rFiche(id);
+}
+function mRapatriement(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  openModal("Rapatriement — combattant étranger", `
+    <p class="small muted" style="margin-bottom:12px">Voie prévue pour les combattants étrangers : retour vers le pays d'origine, en liaison avec les autorités de ce pays et les partenaires (MINUSCA, OIM…). Nationalité déclarée : <b>${esc(c.nat)}</b>.</p>
+    <div class="grid2">
+      <div class="field"><label>Pays de retour *</label><input id="rp_pays" value="${normTxt(c.nat).includes("centrafric")?"":esc(c.nat)}" placeholder="Ex. : Tchad, Soudan…"></div>
+      <div class="field"><label>Date de rapatriement</label><input type="date" id="rp_date" value="${today()}"></div>
+      <div class="field"><label>Convoi / vol / point de passage</label><input id="rp_convoi" placeholder="Ex. : convoi OIM n° 12 — Am-Dafock"></div>
+      <div class="field"><label>Autorités de remise</label><input id="rp_autorites" placeholder="Ex. : autorités tchadiennes — poste de Sido"></div>
+    </div>
+    <div class="field"><label>Observations</label><textarea id="rp_obs" rows="2"></textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveRapatriement('${id}')">Confirmer le rapatriement</button>`);
+}
+function saveRapatriement(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  if(!$("rp_pays").value.trim()){ toast("Le pays de retour est obligatoire."); return; }
+  c.rapatriement={pays:$("rp_pays").value.trim(), date:$("rp_date").value||today(), convoi:$("rp_convoi").value.trim(), autorites:$("rp_autorites").value.trim(), obs:$("rp_obs").value.trim()};
+  c.fin=c.rapatriement.date; c.statut="rapatrie";
+  log("Rapatriement",`${c.num} — vers ${c.rapatriement.pays}${c.rapatriement.convoi?" ("+c.rapatriement.convoi+")":""}`);
+  closeModal(); toast("Rapatriement enregistré — dossier clos."); rFiche(id);
+}
+function mVisite(id){
+  openModal("Visite de suivi", `
+    <div class="grid2"><div class="field"><label>Date de la visite</label><input type="date" id="v_date" value="${today()}"></div>
+    <div class="field"><label>Appréciation</label><select id="v_appr"><option>Satisfaisant</option><option>Moyen</option><option>Préoccupant</option></select></div></div>
+    <div class="field"><label>Observations</label><textarea id="v_obs" rows="3"></textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveVisite('${id}')">Enregistrer la visite</button>`);
+}
+function saveVisite(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  c.reintSocio.visites.push({date:$("v_date").value||today(), agent:CUR.nom, appr:$("v_appr").value, obs:$("v_obs").value.trim()});
+  log("Visite de suivi",`${c.num} — appréciation : ${$("v_appr").value}`);
+  closeModal(); toast("Visite enregistrée."); rFiche(id);
+}
+function reintOf(c){ return c.reintMil||c.reintSocio||null; }
+function jalonsFiche(c){
+  const r=reintOf(c); if(!r) return "";
+  const mil=!!c.reintMil;
+  const [bF,bV]=jalonBadge(c);
+  const enCours=["reintegration_militaire","reintegration_socio"].includes(c.statut);
+  const P=hasPerm("orienter");
+  return `<h3 style="font-size:13px;color:var(--teal-dark);margin:14px 0 8px;text-transform:uppercase">Jalons du parcours</h3>
+  <table style="background:transparent">
+    ${r.promo?`<tr><td style="width:240px;color:var(--muted);font-weight:600">Promotion / vague</td><td colspan="2"><span class="tag">${esc(r.promo)}</span></td></tr>`:""}
+    <tr><td style="width:240px;color:var(--muted);font-weight:600">Formation ${mil?"initiale":"professionnelle"}</td>
+      <td>${bF}${r.formFin&&r.formNote?` <span class="small muted">${esc(r.formNote)}</span>`:""}</td>
+      <td style="text-align:right">${enCours&&!r.formFin&&P?`<button class="btn sm sec" onclick="mFormationFin('${c.id}')">Valider la fin de formation</button>`:""}</td></tr>
+    <tr><td style="color:var(--muted);font-weight:600">Intégration à la vie ${mil?"militaire":"civile"}</td>
+      <td>${bV}${r.vieDate&&r.vieDetail?` <span class="small muted">${esc(r.vieDetail)}</span>`:""}</td>
+      <td style="text-align:right">${enCours&&!r.vieDate&&P?`<button class="btn sm sec" onclick="mIntegration('${c.id}')">Confirmer l'intégration</button>`:""}</td></tr>
+  </table>
+  ${enCours&&(!r.formFin||!r.vieDate)?`<div class="small muted" style="margin-top:6px">La clôture du parcours est recommandée une fois la formation achevée et l'intégration à la vie ${mil?"militaire":"civile"} confirmée.</div>`:""}`;
+}
+function jalonBadge(c){
+  const r=reintOf(c); if(!r) return ["",""];
+  const mil=!!c.reintMil;
+  const form=r.formFin?`<span class="badge st-reintegre" title="${esc(r.formNote||"")}">Achevée le ${fmtD(r.formFin)}</span>`:`<span class="badge st-demobilise">En cours</span>`;
+  const vie=r.vieDate?`<span class="badge st-reintegre" title="${esc(r.vieDetail||"")}">${mil?"Vie militaire":"Vie civile"} · ${fmtD(r.vieDate)}</span>`:`<span class="badge st-enregistre">En attente</span>`;
+  return [form,vie];
+}
+function mFormationFin(id){
+  const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c); const mil=!!c.reintMil;
+  openModal("Fin de la formation", `
+    <p class="small muted" style="margin-bottom:12px">${mil?`Formation initiale : ${esc(c.reintMil.formation)||"—"} (${esc(c.reintMil.corps)})`:`Formation professionnelle — filière ${esc(c.reintSocio.filiere)}${c.reintSocio.centre?" · "+esc(c.reintSocio.centre):""}`}</p>
+    <div class="grid2">
+      <div class="field"><label>Date d'achèvement</label><input type="date" id="ff_date" value="${today()}"></div>
+      <div class="field"><label>Résultat</label><select id="ff_res"><option>Formation achevée avec succès</option><option>Formation achevée — attestation délivrée</option><option>Formation validée partiellement</option><option>Formation interrompue</option></select></div>
+    </div>
+    <div class="field"><label>Observations</label><textarea id="ff_obs" rows="2"></textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveFormationFin('${id}')">Valider la fin de formation</button>`);
+}
+function saveFormationFin(id){
+  const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c);
+  r.formFin=$("ff_date").value||today();
+  r.formNote=($("ff_res").value+($("ff_obs").value.trim()?" — "+$("ff_obs").value.trim():""));
+  log("Fin de formation",`${c.num} — ${r.formNote}`);
+  closeModal(); toast("Fin de formation enregistrée.");
+  VIEW==="reintegration"?rReint():VIEW==="jalons"?rJalons():rFiche(id);
+}
+function mIntegration(id){
+  const c=DB.combattants.find(x=>x.id===id); const mil=!!c.reintMil;
+  openModal(mil?"Intégration à la vie militaire":"Intégration à la vie civile", `
+    <div class="grid2">
+      <div class="field"><label>Date d'intégration effective</label><input type="date" id="vi_date" value="${today()}"></div>
+      <div class="field"><label>${mil?"Unité rejointe / affectation":"Activité exercée / installation"}</label><input id="vi_det" value="${mil?esc(c.reintMil.unite||""):esc(c.reintSocio.filiere||"")}"></div>
+      ${mil?`<div class="field"><label>Matricule attribué</label><input id="vi_mat" value="${esc(c.reintMil.matricule||"")}" placeholder="Saisi à l'intégration, pas en formation"></div>`:""}
+    </div>
+    <p class="small muted">${mil?"Confirme que l'intéressé a effectivement rejoint son unité et sert au sein des forces. Le matricule peut être renseigné ici s'il n'avait pas été attribué en formation.":"Confirme que l'intéressé exerce effectivement son activité et est installé dans la vie civile."}</p>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveIntegration('${id}')">Confirmer l'intégration</button>`);
+}
+function saveIntegration(id){
+  const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c); const mil=!!c.reintMil;
+  r.vieDate=$("vi_date").value||today();
+  r.vieDetail=$("vi_det").value.trim();
+  if(mil && $("vi_mat")) c.reintMil.matricule=$("vi_mat").value.trim();
+  log("Intégration "+(mil?"vie militaire":"vie civile"),`${c.num}${r.vieDetail?" — "+r.vieDetail:""}${mil&&c.reintMil.matricule?" · matricule "+c.reintMil.matricule:""}`);
+  closeModal(); toast("Intégration confirmée.");
+  VIEW==="reintegration"?rReint():VIEW==="jalons"?rJalons():rFiche(id);
+}
+function markReintegre(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  const r=reintOf(c);
+  const alerte=r&&(!r.formFin||!r.vieDate)?`<div class="small" style="background:#FFF7E0;border:1px solid #E8D48A;border-radius:7px;padding:9px;margin-bottom:10px">⚠ ${!r.formFin?"La fin de formation n'est pas encore validée. ":""}${!r.vieDate?"L'intégration à la vie "+(c.reintMil?"militaire":"civile")+" n'est pas encore confirmée. ":""}La clôture les considérera comme atteintes à la date choisie.</div>`:"";
+  openModal("Clôture du parcours", `${alerte}<p>Confirmer que <b>${esc(c.nom)} ${esc(c.prenom)}</b> (${c.num}) a achevé son parcours de réintégration ?</p>
+    <div class="field" style="margin-top:12px"><label>Date d'achèvement</label><input type="date" id="fin_date" value="${today()}"></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveReintegre('${id}')">Confirmer</button>`);
+}
+function saveReintegre(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  c.fin=$("fin_date").value||today(); c.statut="reintegre";
+  const r=reintOf(c);
+  if(r){ if(!r.formFin){ r.formFin=c.fin; r.formNote=r.formNote||"Considérée achevée à la clôture du parcours"; }
+    if(!r.vieDate){ r.vieDate=c.fin; r.vieDetail=r.vieDetail||(c.reintMil?"Intégration confirmée à la clôture":"Intégration à la vie civile confirmée à la clôture"); } }
+  log("Clôture",`${c.num} — réintégration achevée`);
+  closeModal(); toast("Parcours clôturé — réintégré."); rFiche(id);
+}
+function markAbandon(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  openModal("Déclaration d'abandon", `<p>Déclarer l'abandon du processus par <b>${esc(c.nom)} ${esc(c.prenom)}</b> (${c.num}) ?</p>
+    <div class="field" style="margin-top:12px"><label>Motif</label><textarea id="ab_motif" rows="2" placeholder="Ex. : ne s'est plus présenté au site depuis 3 mois"></textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn danger" onclick="saveAbandon('${id}')">Déclarer l'abandon</button>`);
+}
+function saveAbandon(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  c.abandon={date:today(), motif:$("ab_motif").value.trim()||"Non précisé"}; c.statut="abandon";
+  log("Abandon",`${c.num} — ${c.abandon.motif}`);
+  closeModal(); toast("Abandon enregistré."); rFiche(id);
+}
+
+
+
+/* module: operations/aptitude.js — PNDDRR engine (classic globals) */
+/* Aptitude : parcours combattant et première orientation (Militaire / Socio-économique) */
+var APT_Q = "";
+
+function aptMatch(c) {
+  const q = APT_Q.trim().toLowerCase();
+  if (!q) return true;
+  return [c.num, c.nom, c.prenom, c.alias, c.vague, c.prefecture].join(" ").toLowerCase().includes(q);
+}
+
+function aptComplete(c) {
+  return !!(c.aptitude && c.aptitude.date);
+}
+
+function aptEligible(c) {
+  return ["desarme", "demobilise", "reintegration_militaire", "reintegration_socio", "reintegre"].includes(c.statut) || c.desarmement;
+}
+
+function rAptitude() {
+  const pending = DB.combattants.filter((c) => aptEligible(c) && !aptComplete(c) && aptMatch(c));
+  const done = DB.combattants.filter((c) => aptComplete(c) && aptMatch(c)).sort((a, b) => (b.aptitude.date || "").localeCompare(a.aptitude.date || ""));
+
+  $("view").innerHTML = `
+  <div class="panel"><div class="ph"><h3>Aptitude</h3><span class="muted small">Opération</span></div>
+  <div class="pb">
+    <p>Première décision d'orientation et saisie du parcours dans le groupe armé : fonction, niveau d'instruction, années de service et zone d'opération.</p>
+  </div></div>
+  <div class="toolbar">
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="apt_q" value="${esc(APT_Q)}" oninput="APT_Q=this.value;rAptitude()" placeholder="Nom, n° dossier, vague…"></div>
+  </div>
+  <div class="cards">
+    <div class="kpi c-dem"><div class="n">${pending.length}</div><div class="l">En attente de saisie aptitude</div></div>
+    <div class="kpi c-ok"><div class="n">${done.length}</div><div class="l">Aptitudes enregistrées</div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>À traiter (${pending.length})</h3></div><div class="pb nopad">${
+    pending.length
+      ? `<table><thead><tr><th>Dossier</th><th>Nom &amp; prénom</th><th>Statut</th><th>Préfecture</th><th>Actions</th></tr></thead><tbody>${pending
+          .map(
+            (c) => `<tr><td><b>${c.num}</b></td>
+      <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
+      <td><span class="badge st-${c.statut}">${STATUTS[c.statut].lbl}</span></td>
+      <td class="small">${esc(c.prefecture)}</td>
+      <td><button class="btn sm" onclick="mAptitude('${c.id}')">Saisir l'aptitude</button></td></tr>`
+          )
+          .join("")}</tbody></table>`
+      : `<div class="empty">Aucun dossier en attente${APT_Q ? " pour cette recherche" : " — les dossiers apparaissent après enregistrement et désarmement"}.</div>`
+  }</div></div>
+  <div class="panel"><div class="ph"><h3>Historique récent (${Math.min(done.length, 25)})</h3></div><div class="pb nopad">${
+    done.length
+      ? `<table><thead><tr><th>Dossier</th><th>Titulaire</th><th>Orientation</th><th>Groupe</th><th>Saisi le</th><th></th></tr></thead><tbody>${done
+          .slice(0, 25)
+          .map(
+            (c) => `<tr><td><b>${c.num}</b></td><td>${esc(c.nom)} ${esc(c.prenom)}</td>
+      <td>${esc(c.souhait || c.aptitude.orientation || "—")}</td><td class="small">${esc(c.groupe)}</td>
+      <td>${fmtD(c.aptitude.date)}</td>
+      <td><button class="btn sm ghost" onclick="mAptitude('${c.id}')">Modifier</button></td></tr>`
+          )
+          .join("")}</tbody></table>`
+      : `<div class="empty">Aucune aptitude enregistrée.</div>`
+  }</div></div>`;
+}
+
+function mAptitude(id) {
+  const c = DB.combattants.find((x) => x.id === id);
+  if (!c) return;
+  const a = c.aptitude || {};
+  openModal(
+    `Aptitude — ${c.num}`,
+    `
+    <p class="small muted" style="margin-bottom:12px">Décision d'orientation et parcours combattant (profil aptitude).</p>
+    <div class="grid2">
+      <div class="field"><label>Orientation *</label><select id="apt_orient">${selOpts(["Socio-économique", "Militaire", "Indécis"], c.souhait || a.orientation || "Indécis")}</select></div>
+      <div class="field"><label>Groupe armé d'origine *</label><div style="display:flex;gap:6px"><select id="apt_grp" style="flex:1">${selOpts(GROUPES, c.groupe || "Autre")}</select>${hasPerm("referentiels") ? `<button type="button" class="btn sec sm" onclick="quickAddGroupe()">+</button>` : ""}</div></div>
+      <div class="field"><label>Fonction / grade dans le groupe</label><input id="apt_grade" value="${esc(c.grade || a.grade || "")}"></div>
+      <div class="field"><label>Années passées dans le groupe</label><input type="number" min="0" id="apt_annees" value="${esc(c.annees || a.annees || "")}"></div>
+      <div class="field"><label>Zone d'opération principale</label><input id="apt_zone" value="${esc(c.zone || a.zone || "")}"></div>
+      <div class="field"><label>Niveau d'instruction</label><select id="apt_instr">${selOpts(["Aucun", "Primaire", "Secondaire", "Supérieur", "Coranique"], c.instr || a.instr || "Aucun")}</select></div>
+    </div>
+    <div class="field"><label>Observations aptitude</label><textarea id="apt_obs" rows="2">${esc(a.obs || "")}</textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveAptitude('${id}')">Enregistrer l'aptitude</button>`
+  );
+}
+
+function saveAptitude(id) {
+  const c = DB.combattants.find((x) => x.id === id);
+  if (!c) return;
+  const orientation = $("apt_orient").value;
+  const groupe = $("apt_grp").value;
+  if (!groupe) {
+    toast("Le groupe armé est obligatoire.");
+    return;
+  }
+  const grade = $("apt_grade").value.trim();
+  const annees = $("apt_annees").value;
+  const zone = $("apt_zone").value.trim();
+  const instr = $("apt_instr").value;
+  const obs = $("apt_obs").value.trim();
+  c.aptitude = {
+    date: today(),
+    agent: CUR.nom,
+    orientation,
+    groupe,
+    grade,
+    annees,
+    zone,
+    instr,
+    obs,
+  };
+  c.groupe = groupe;
+  c.grade = grade;
+  c.annees = annees;
+  c.zone = zone;
+  c.instr = instr;
+  c.souhait = orientation;
+  log("Aptitude", `${c.num} — orientation ${orientation}, ${groupe}`);
+  closeModal();
+  toast("Aptitude enregistrée.");
+  rAptitude();
+}
+
+/* module: operations/medecine.js — PNDDRR engine (classic globals) */
+var MED_Q = "";
+
+function medMatch(c) {
+  const q = MED_Q.trim().toLowerCase();
+  if (!q) return true;
+  return [c.num, c.nom, c.prenom, c.vague, c.prefecture].join(" ").toLowerCase().includes(q);
+}
+
+function medEligible(c) {
+  return aptComplete(c);
+}
+
+function medVerdictLbl(c) {
+  if (!c.medecine || !c.medecine.verdict) return "—";
+  return c.medecine.verdict === "apte" ? "Apte physique et biologiquement" : "Inapte physique et biologiquement";
+}
+
+function rMedecine() {
+  const pending = DB.combattants.filter((c) => medEligible(c) && !(c.medecine && c.medecine.date) && medMatch(c));
+  const done = DB.combattants.filter((c) => c.medecine && c.medecine.date && medMatch(c)).sort((a, b) => b.medecine.date.localeCompare(a.medecine.date));
+
+  $("view").innerHTML = `
+  <div class="panel"><div class="ph"><h3>Médecine</h3><span class="muted small">Opération</span></div>
+  <div class="pb"><p>Le médecin signifie si le combattant est <b>apte</b> ou <b>inapte</b>, physiquement et biologiquement, avant la suite du circuit.</p></div></div>
+  <div class="toolbar">
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="med_q" value="${esc(MED_Q)}" oninput="MED_Q=this.value;rMedecine()" placeholder="Nom, n° dossier…"></div>
+  </div>
+  <div class="cards">
+    <div class="kpi c-dem"><div class="n">${pending.length}</div><div class="l">En attente d'avis médical</div></div>
+    <div class="kpi c-ok"><div class="n">${done.filter((c) => c.medecine.verdict === "apte").length}</div><div class="l">Apters</div></div>
+    <div class="kpi c-des"><div class="n">${done.filter((c) => c.medecine.verdict === "inapte").length}</div><div class="l">Inaptes</div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Consultations à signer (${pending.length})</h3></div><div class="pb nopad">${
+    pending.length
+      ? `<table><thead><tr><th>Dossier</th><th>Nom</th><th>Orientation</th><th>Actions</th></tr></thead><tbody>${pending
+          .map(
+            (c) => `<tr><td><b>${c.num}</b></td><td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
+      <td>${esc(c.souhait || "—")}</td><td><button class="btn sm" onclick="mMedecine('${c.id}')">Saisir l'avis</button></td></tr>`
+          )
+          .join("")}</tbody></table>`
+      : `<div class="empty">Aucun dossier en attente — l'aptitude doit être saisie au préalable.</div>`
+  }</div></div>
+  <div class="panel"><div class="ph"><h3>Avis enregistrés (${done.length})</h3></div><div class="pb nopad">${
+    done.length
+      ? `<table><thead><tr><th>Dossier</th><th>Nom</th><th>Avis</th><th>Date</th><th>Médecin / agent</th><th></th></tr></thead><tbody>${done
+          .slice(0, 40)
+          .map(
+            (c) => `<tr><td><b>${c.num}</b></td><td>${esc(c.nom)} ${esc(c.prenom)}</td>
+      <td>${c.medecine.verdict === "apte" ? '<span class="badge st-reintegre">Apte</span>' : '<span class="badge st-abandon">Inapte</span>'}</td>
+      <td>${fmtD(c.medecine.date)}</td><td class="small">${esc(c.medecine.agent || "—")}</td>
+      <td><button class="btn sm ghost" onclick="mMedecine('${c.id}')">Modifier</button></td></tr>`
+          )
+          .join("")}</tbody></table>`
+      : `<div class="empty">Aucun avis médical.</div>`
+  }</div></div>`;
+}
+
+function mMedecine(id) {
+  const c = DB.combattants.find((x) => x.id === id);
+  if (!c) return;
+  const v = (c.medecine && c.medecine.verdict) || "apte";
+  openModal(
+    `Avis médical — ${c.num}`,
+    `
+    <p><b>${esc(c.nom)} ${esc(c.prenom)}</b> — dossier ${c.num}</p>
+    <div class="field" style="margin-top:14px"><label>Verdict *</label>
+    <select id="med_verdict">
+      <option value="apte" ${v === "apte" ? "selected" : ""}>Apte physique et biologiquement</option>
+      <option value="inapte" ${v === "inapte" ? "selected" : ""}>Inapte physique et biologiquement</option>
+    </select></div>
+    <div class="field"><label>Observations</label><textarea id="med_obs" rows="2">${esc((c.medecine && c.medecine.obs) || "")}</textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveMedecine('${id}')">Valider l'avis</button>`
+  );
+}
+
+function saveMedecine(id) {
+  const c = DB.combattants.find((x) => x.id === id);
+  if (!c) return;
+  c.medecine = {
+    date: today(),
+    agent: CUR.nom,
+    verdict: $("med_verdict").value,
+    obs: $("med_obs").value.trim(),
+  };
+  log("Médecine", `${c.num} — ${medVerdictLbl(c)}`);
+  closeModal();
+  toast("Avis médical enregistré.");
+  rMedecine();
+}
+
+/* module: documents/docs.js — PNDDRR engine (classic globals) */
+/* ================= DOCUMENTS IMPRIMABLES ================= */
+function docEntete(service){
+  return `<div class="entete">
+    <div class="rep">République Centrafricaine</div>
+    <div class="devise">Unité — Dignité — Travail</div>
+    <div class="armoiries">${ARM_SVG}</div>
+    <div class="min">Unité d'exécution du Programme national de désarmement,<br>démobilisation, réintégration et rapatriement</div>
+    ${service?`<div class="min" style="margin-top:3px;font-size:11.5px">${service}</div>`:""}
+    <div class="trait"></div>
+  </div>`;
+}
+function docWrap(inner){
+  return `<div class="doc"><div class="wm">${ARM_SVG}</div><div class="inner">${inner}</div></div>`;
+}
+function doPrint(html, kind){
+  document.body.classList.toggle("print-pvc", kind==="pvc");
+  const zone=$("printZone");
+  if(zone && zone.parentNode!==document.body) document.body.appendChild(zone);
+  zone.innerHTML = html;
+  zone.className = kind==="pvc" ? "pvc" : "";
+  $("prevBody").innerHTML = html;
+  $("prevBody").className = kind==="pvc" ? "pvc" : "";
+  const ttl=document.querySelector("#printPrev .pp-bar b");
+  if(ttl) ttl.textContent = kind==="pvc" ? "Aperçu carte PVC — 8,5 × 5,5 cm (une face par page)" : "Aperçu du document";
+  $("printPrev").style.display = "flex";
+  document.body.style.overflow = "hidden";
+}
+function prevClose(){
+  $("printPrev").style.display="none";
+  document.body.style.overflow="";
+  document.body.classList.remove("print-pvc");
+  $("prevBody").className="";
+  $("printZone").innerHTML="";
+  $("printZone").className="";
+  const frame=document.getElementById("pnddrrPrintFrame");
+  if(frame) frame.remove();
+}
+function prevPrint(){
+  const pvc=document.body.classList.contains("print-pvc");
+  const markup=($("printZone")&&$("printZone").innerHTML)||($("prevBody")&&$("prevBody").innerHTML);
+  if(!markup){ toast("Rien à imprimer."); return; }
+  let frame=document.getElementById("pnddrrPrintFrame");
+  if(frame) frame.remove();
+  frame=document.createElement("iframe");
+  frame.id="pnddrrPrintFrame";
+  frame.setAttribute("aria-hidden","true");
+  frame.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none";
+  document.body.appendChild(frame);
+  const doc=frame.contentDocument;
+  const headBits=[...document.querySelectorAll("link[rel='stylesheet'], style")].map(n=>n.outerHTML).join("");
+  const page=pvc?"size:85mm 55mm;margin:0":"size:A4 portrait;margin:12mm";
+  doc.open();
+  doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Impression PNDDRR</title>${headBits}
+<style>
+@page{${page}}
+html,body{margin:0!important;padding:0!important;background:#fff!important;height:auto!important;overflow:visible!important}
+body>*:not(#printZone){display:none!important}
+#printZone{display:block!important;visibility:visible!important;position:static!important;left:auto!important;top:auto!important;width:${pvc?"85mm":"auto"}!important;height:auto!important}
+#printZone *{visibility:visible!important}
+</style></head>
+<body class="${pvc?"print-pvc":""}"><div id="printZone" class="${pvc?"pvc":""}">${markup}</div></body></html>`);
+  doc.close();
+  let printed=false;
+  const run=()=>{
+    if(printed) return;
+    printed=true;
+    try{ frame.contentWindow.focus(); frame.contentWindow.print(); }
+    catch(e){ toast("Impression indisponible dans cet aperçu — utilisez Chrome, Edge ou Firefox."); }
+  };
+  const links=[...doc.querySelectorAll("link[rel='stylesheet']")];
+  if(!links.length){ setTimeout(run, 80); return; }
+  let left=links.length;
+  const one=()=>{ left-=1; if(left<=0) setTimeout(run, 80); };
+  links.forEach(l=>{
+    if(l.sheet){ one(); return; }
+    l.addEventListener("load", one);
+    l.addEventListener("error", one);
+  });
+  setTimeout(run, 1200);
+}
+function printFiche(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  const arm = c.desarmement ? `<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Armement remis (${fmtD(c.desarmement.date)} — ${esc(c.desarmement.lieu)})</h3>
+    <table class="dt"><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th><th>Munitions</th></tr>${
+    c.desarmement.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${esc(a.mun)||"—"}</td></tr>`).join("")}</table>${(c.desarmement.munitions||[]).length?`<p style="margin-top:4px"><b>Munitions et explosifs :</b> ${c.desarmement.munitions.map(m=>`${fmtN(m.qte)} ${esc(m.unite)}${m.nature?" ("+esc(m.nature)+")":""}`).join(" ; ")}</p>`:""}` : "";
+  let reint="";
+  if(c.reintMil) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration militaire</h3>
+    <table class="dt"><tr><th>Corps</th><td>${esc(c.reintMil.corps)}</td><th>Matricule</th><td>${esc(c.reintMil.matricule)||"—"}</td></tr>
+    <tr><th>Unité</th><td>${esc(c.reintMil.unite)||"—"}</td><th>Incorporation</th><td>${fmtD(c.reintMil.date)}</td></tr></table>`;
+  if(c.reintSocio) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration socio-économique</h3>
+    <table class="dt"><tr><th>Filière</th><td>${esc(c.reintSocio.filiere)}</td><th>Centre</th><td>${esc(c.reintSocio.centre)||"—"}</td></tr>
+    <tr><th>Kit remis</th><td>${c.reintSocio.kit?"Oui — "+fmtD(c.reintSocio.kitDate):"Non"}</td><th>Appui</th><td>${c.reintSocio.appui?fmtN(c.reintSocio.appui)+" FCFA":"—"}</td></tr>
+    <tr><th>Début</th><td>${fmtD(c.reintSocio.date)}</td><th>Visites de suivi</th><td>${c.reintSocio.visites.length}</td></tr></table>`;
+  doPrint(docWrap(`${docEntete("Fiche individuelle d'ex-combattant")}
+    <h2 class="titre">Fiche individuelle n° ${c.num}</h2>
+    <table class="dt">
+      <tr><th style="width:26%">Nom & prénom(s)</th><td>${esc(c.nom)} ${esc(c.prenom)}</td><th style="width:18%">Alias</th><td>${esc(c.alias)||"—"}</td></tr>
+      <tr><th>Sexe</th><td>${c.sexe==="M"?"Masculin":"Féminin"}</td><th>Naissance</th><td>${fmtD(c.dn)} à ${esc(c.ln)||"—"}</td></tr>
+      <tr><th>Nationalité</th><td>${esc(c.nat)}</td><th>Téléphone</th><td>${esc(c.tel)||"—"}</td></tr>
+      <tr><th>Préfecture</th><td>${esc(c.prefecture)}</td><th>Site</th><td>${esc(c.site)||"—"}</td></tr>
+      <tr><th>Groupe armé</th><td>${esc(c.groupe)}</td><th>Fonction</th><td>${esc(c.grade)||"—"}</td></tr>
+      <tr><th>Statut actuel</th><td colspan="3"><b>${STATUTS[c.statut].lbl}</b>${c.demobilisation?` — carte de démobilisé n° ${c.demobilisation.carte}`:""}</td></tr>
+    </table>
+    ${arm}${reint}
+    <div class="sig">
+      <div class="c">L'intéressé(e)<div class="ligne">${esc(c.nom)} ${esc(c.prenom)}</div></div>
+      <div class="c">Fait à ${esc(c.prefecture)}, le ${new Date().toLocaleDateString("fr-FR")}<br>L'agent du PNDDRR<div class="ligne">${esc(CUR.nom)}</div></div>
+    </div>`));
+  log("Impression",`Fiche individuelle ${c.num}`);
+}
+function attestationHtml(c){
+  const d=c.desarmement;
+  return docWrap(`${docEntete("")}
+    <h2 class="titre">Attestation de désarmement</h2>
+    <p>Le Programme National de Désarmement, Démobilisation, Réintégration et Rapatriement atteste que :</p>
+    <p style="text-align:center;font-size:14.5px"><b>${esc(c.nom)} ${esc(c.prenom)}</b>${c.alias?`, alias « ${esc(c.alias)} »`:""},<br>
+    né(e) le ${fmtD(c.dn)} à ${esc(c.ln)||"—"}, de nationalité ${esc(c.nat)},<br>
+    anciennement membre du groupe <b>${esc(c.groupe)}</b>,</p>
+    <p>a volontairement remis aux autorités du Programme, le <b>${fmtD(d.date)}</b> à <b>${esc(d.lieu)}</b>, l'armement et le matériel ci-après :</p>
+    <table class="dt"><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th></tr>${
+      d.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td></tr>`).join("")}</table>
+    ${(d.munitions||[]).length?`<p style="margin-top:6px"><b>Munitions et explosifs :</b></p>
+    <table class="dt"><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th></tr>${
+      d.munitions.map(m=>`<tr><td>${esc(m.nature)||"—"}</td><td>${fmtN(m.qte)}</td><td>${esc(m.unite)}</td><td>${esc(m.obs)||"—"}</td></tr>`).join("")}</table>`:""}
+    <p>En foi de quoi, la présente attestation lui est délivrée pour servir et valoir ce que de droit, dans le cadre du dossier n° <b>${c.num}</b>.</p>
+    <div class="sig">
+      <div class="c">L'intéressé(e)<div class="ligne">${esc(c.nom)} ${esc(c.prenom)}</div></div>
+      <div class="c">Fait à ${esc(d.lieu)}, le ${new Date().toLocaleDateString("fr-FR")}<br>Pour le PNDDRR<div class="ligne">${esc(d.agent)}</div></div>
+    </div>`);
+}
+function printAttestation(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  doPrint(attestationHtml(c));
+  log("Impression",`Attestation de désarmement ${c.num}`);
+}
+function authCode(c, legacy){
+  const sel = legacy||!DB.secret ? "UEPNDDR-RCA" : DB.secret;
+  const base=[c.num,c.demobilisation.carte,c.nom,c.prenom,c.dn||"",c.demobilisation.date,sel].join("|");
+  let h1=5381, h2=0;
+  for(let i=0;i<base.length;i++){ const ch=base.charCodeAt(i); h1=((h1<<5)+h1+ch)>>>0; h2=(ch+(h2<<6)+(h2<<16)-h2)>>>0; }
+  const hex=(h1.toString(16)+h2.toString(16)+((h1^h2)>>>0).toString(16)).toUpperCase().padEnd(12,"0").slice(0,12);
+  return hex.slice(0,4)+"-"+hex.slice(4,8)+"-"+hex.slice(8,12);
+}
+/* Générateur de QR code embarqué (qrcode-generator, licence MIT, minifié) */
+var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],f={},c=function(t,r){o=function(t){for(var r=new Array(t),e=0;e<t;e+=1){r[e]=new Array(t);for(var n=0;n<t;n+=1)r[e][n]=null}return r}(i=4*e+17),l(0,0),l(i-7,0),l(0,i-7),s(),h(),d(t,r),e>=7&&v(t),null==a&&(a=p(e,n,u)),w(a,r)},l=function(t,r){for(var e=-1;e<=7;e+=1)if(!(t+e<=-1||i<=t+e))for(var n=-1;n<=7;n+=1)r+n<=-1||i<=r+n||(o[t+e][r+n]=0<=e&&e<=6&&(0==n||6==n)||0<=n&&n<=6&&(0==e||6==e)||2<=e&&e<=4&&2<=n&&n<=4)},h=function(){for(var t=8;t<i-8;t+=1)null==o[t][6]&&(o[t][6]=t%2==0);for(var r=8;r<i-8;r+=1)null==o[6][r]&&(o[6][r]=r%2==0)},s=function(){for(var t=B.getPatternPosition(e),r=0;r<t.length;r+=1)for(var n=0;n<t.length;n+=1){var i=t[r],a=t[n];if(null==o[i][a])for(var u=-2;u<=2;u+=1)for(var f=-2;f<=2;f+=1)o[i+u][a+f]=-2==u||2==u||-2==f||2==f||0==u&&0==f}},v=function(t){for(var r=B.getBCHTypeNumber(e),n=0;n<18;n+=1){var a=!t&&1==(r>>n&1);o[Math.floor(n/3)][n%3+i-8-3]=a}for(n=0;n<18;n+=1){a=!t&&1==(r>>n&1);o[n%3+i-8-3][Math.floor(n/3)]=a}},d=function(t,r){for(var e=n<<3|r,a=B.getBCHTypeInfo(e),u=0;u<15;u+=1){var f=!t&&1==(a>>u&1);u<6?o[u][8]=f:u<8?o[u+1][8]=f:o[i-15+u][8]=f}for(u=0;u<15;u+=1){f=!t&&1==(a>>u&1);u<8?o[8][i-u-1]=f:u<9?o[8][15-u-1+1]=f:o[8][15-u-1]=f}o[i-8][8]=!t},w=function(t,r){for(var e=-1,n=i-1,a=7,u=0,f=B.getMaskFunction(r),c=i-1;c>0;c-=2)for(6==c&&(c-=1);;){for(var g=0;g<2;g+=1)if(null==o[n][c-g]){var l=!1;u<t.length&&(l=1==(t[u]>>>a&1)),f(n,c-g)&&(l=!l),o[n][c-g]=l,-1==(a-=1)&&(u+=1,a=7)}if((n+=e)<0||i<=n){n-=e,e=-e;break}}},p=function(t,r,e){for(var n=A.getRSBlocks(t,r),o=b(),i=0;i<e.length;i+=1){var a=e[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var u=0;for(i=0;i<n.length;i+=1)u+=n[i].dataCount;if(o.getLengthInBits()>8*u)throw"code length overflow. ("+o.getLengthInBits()+">"+8*u+")";for(o.getLengthInBits()+4<=8*u&&o.put(0,4);o.getLengthInBits()%8!=0;)o.putBit(!1);for(;!(o.getLengthInBits()>=8*u||(o.put(236,8),o.getLengthInBits()>=8*u));)o.put(17,8);return function(t,r){for(var e=0,n=0,o=0,i=new Array(r.length),a=new Array(r.length),u=0;u<r.length;u+=1){var f=r[u].dataCount,c=r[u].totalCount-f;n=Math.max(n,f),o=Math.max(o,c),i[u]=new Array(f);for(var g=0;g<i[u].length;g+=1)i[u][g]=255&t.getBuffer()[g+e];e+=f;var l=B.getErrorCorrectPolynomial(c),h=k(i[u],l.getLength()-1).mod(l);for(a[u]=new Array(l.getLength()-1),g=0;g<a[u].length;g+=1){var s=g+h.getLength()-a[u].length;a[u][g]=s>=0?h.getAt(s):0}}var v=0;for(g=0;g<r.length;g+=1)v+=r[g].totalCount;var d=new Array(v),w=0;for(g=0;g<n;g+=1)for(u=0;u<r.length;u+=1)g<i[u].length&&(d[w]=i[u][g],w+=1);for(g=0;g<o;g+=1)for(u=0;u<r.length;u+=1)g<a[u].length&&(d[w]=a[u][g],w+=1);return d}(o,n)};f.addData=function(t,r){var e=null;switch(r=r||"Byte"){case"Numeric":e=M(t);break;case"Alphanumeric":e=x(t);break;case"Byte":e=m(t);break;case"Kanji":e=L(t);break;default:throw"mode:"+r}u.push(e),a=null},f.isDark=function(t,r){if(t<0||i<=t||r<0||i<=r)throw t+","+r;return o[t][r]},f.getModuleCount=function(){return i},f.make=function(){if(e<1){for(var t=1;t<40;t++){for(var r=A.getRSBlocks(t,n),o=b(),i=0;i<u.length;i++){var a=u[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var g=0;for(i=0;i<r.length;i++)g+=r[i].dataCount;if(o.getLengthInBits()<=8*g)break}e=t}c(!1,function(){for(var t=0,r=0,e=0;e<8;e+=1){c(!0,e);var n=B.getLostPoint(f);(0==e||t>n)&&(t=n,r=e)}return r}())},f.createTableTag=function(t,r){t=t||2;var e="";e+='<table style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: "+(r=void 0===r?4*t:r)+"px;",e+='">',e+="<tbody>";for(var n=0;n<f.getModuleCount();n+=1){e+="<tr>";for(var o=0;o<f.getModuleCount();o+=1)e+='<td style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: 0px;",e+=" width: "+t+"px;",e+=" height: "+t+"px;",e+=" background-color: ",e+=f.isDark(n,o)?"#000000":"#ffffff",e+=";",e+='"/>';e+="</tr>"}return e+="</tbody>",e+="</table>"},f.createSvgTag=function(t,r,e,n){var o={};"object"==typeof arguments[0]&&(t=(o=arguments[0]).cellSize,r=o.margin,e=o.alt,n=o.title),t=t||2,r=void 0===r?4*t:r,(e="string"==typeof e?{text:e}:e||{}).text=e.text||null,e.id=e.text?e.id||"qrcode-description":null,(n="string"==typeof n?{text:n}:n||{}).text=n.text||null,n.id=n.text?n.id||"qrcode-title":null;var i,a,u,c,g=f.getModuleCount()*t+2*r,l="";for(c="l"+t+",0 0,"+t+" -"+t+",0 0,-"+t+"z ",l+='<svg version="1.1" xmlns="http://www.w3.org/2000/svg"',l+=o.scalable?"":' width="'+g+'px" height="'+g+'px"',l+=' viewBox="0 0 '+g+" "+g+'" ',l+=' preserveAspectRatio="xMinYMin meet"',l+=n.text||e.text?' role="img" aria-labelledby="'+y([n.id,e.id].join(" ").trim())+'"':"",l+=">",l+=n.text?'<title id="'+y(n.id)+'">'+y(n.text)+"</title>":"",l+=e.text?'<description id="'+y(e.id)+'">'+y(e.text)+"</description>":"",l+='<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>',l+='<path d="',a=0;a<f.getModuleCount();a+=1)for(u=a*t+r,i=0;i<f.getModuleCount();i+=1)f.isDark(a,i)&&(l+="M"+(i*t+r)+","+u+c);return l+='" stroke="transparent" fill="black"/>',l+="</svg>"},f.createDataURL=function(t,r){t=t||2,r=void 0===r?4*t:r;var e=f.getModuleCount()*t+2*r,n=r,o=e-r;return I(e,e,function(r,e){if(n<=r&&r<o&&n<=e&&e<o){var i=Math.floor((r-n)/t),a=Math.floor((e-n)/t);return f.isDark(a,i)?0:1}return 1})},f.createImgTag=function(t,r,e){t=t||2,r=void 0===r?4*t:r;var n=f.getModuleCount()*t+2*r,o="";return o+="<img",o+=' src="',o+=f.createDataURL(t,r),o+='"',o+=' width="',o+=n,o+='"',o+=' height="',o+=n,o+='"',e&&(o+=' alt="',o+=y(e),o+='"'),o+="/>"};var y=function(t){for(var r="",e=0;e<t.length;e+=1){var n=t.charAt(e);switch(n){case"<":r+="&lt;";break;case">":r+="&gt;";break;case"&":r+="&amp;";break;case'"':r+="&quot;";break;default:r+=n}}return r};return f.createASCII=function(t,r){if((t=t||1)<2)return function(t){t=void 0===t?2:t;var r,e,n,o,i,a=1*f.getModuleCount()+2*t,u=t,c=a-t,g={"██":"█","█ ":"▀"," █":"▄","  ":" "},l={"██":"▀","█ ":"▀"," █":" ","  ":" "},h="";for(r=0;r<a;r+=2){for(n=Math.floor((r-u)/1),o=Math.floor((r+1-u)/1),e=0;e<a;e+=1)i="█",u<=e&&e<c&&u<=r&&r<c&&f.isDark(n,Math.floor((e-u)/1))&&(i=" "),u<=e&&e<c&&u<=r+1&&r+1<c&&f.isDark(o,Math.floor((e-u)/1))?i+=" ":i+="█",h+=t<1&&r+1>=c?l[i]:g[i];h+="\n"}return a%2&&t>0?h.substring(0,h.length-a-1)+Array(a+1).join("▀"):h.substring(0,h.length-1)}(r);t-=1,r=void 0===r?2*t:r;var e,n,o,i,a=f.getModuleCount()*t+2*r,u=r,c=a-r,g=Array(t+1).join("██"),l=Array(t+1).join("  "),h="",s="";for(e=0;e<a;e+=1){for(o=Math.floor((e-u)/t),s="",n=0;n<a;n+=1)i=1,u<=n&&n<c&&u<=e&&e<c&&f.isDark(o,Math.floor((n-u)/t))&&(i=0),s+=i?g:l;for(o=0;o<t;o+=1)h+=s+"\n"}return h.substring(0,h.length-1)},f.renderTo2dContext=function(t,r){r=r||2;for(var e=f.getModuleCount(),n=0;n<e;n++)for(var o=0;o<e;o++)t.fillStyle=f.isDark(n,o)?"black":"white",t.fillRect(o*r,n*r,r,r)},f};t.stringToBytes=(t.stringToBytesFuncs={default:function(t){for(var r=[],e=0;e<t.length;e+=1){var n=t.charCodeAt(e);r.push(255&n)}return r}}).default,t.createStringToBytes=function(t,r){var e=function(){for(var e=S(t),n=function(){var t=e.read();if(-1==t)throw"eof";return t},o=0,i={};;){var a=e.read();if(-1==a)break;var u=n(),f=n()<<8|n();i[String.fromCharCode(a<<8|u)]=f,o+=1}if(o!=r)throw o+" != "+r;return i}(),n="?".charCodeAt(0);return function(t){for(var r=[],o=0;o<t.length;o+=1){var i=t.charCodeAt(o);if(i<128)r.push(i);else{var a=e[t.charAt(o)];"number"==typeof a?(255&a)==a?r.push(a):(r.push(a>>>8),r.push(255&a)):r.push(n)}}return r}};var r,e,n,o,i,a=1,u=2,f=4,c=8,g={L:1,M:0,Q:3,H:2},l=0,h=1,s=2,v=3,d=4,w=5,p=6,y=7,B=(r=[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],e=1335,n=7973,i=function(t){for(var r=0;0!=t;)r+=1,t>>>=1;return r},(o={}).getBCHTypeInfo=function(t){for(var r=t<<10;i(r)-i(e)>=0;)r^=e<<i(r)-i(e);return 21522^(t<<10|r)},o.getBCHTypeNumber=function(t){for(var r=t<<12;i(r)-i(n)>=0;)r^=n<<i(r)-i(n);return t<<12|r},o.getPatternPosition=function(t){return r[t-1]},o.getMaskFunction=function(t){switch(t){case l:return function(t,r){return(t+r)%2==0};case h:return function(t,r){return t%2==0};case s:return function(t,r){return r%3==0};case v:return function(t,r){return(t+r)%3==0};case d:return function(t,r){return(Math.floor(t/2)+Math.floor(r/3))%2==0};case w:return function(t,r){return t*r%2+t*r%3==0};case p:return function(t,r){return(t*r%2+t*r%3)%2==0};case y:return function(t,r){return(t*r%3+(t+r)%2)%2==0};default:throw"bad maskPattern:"+t}},o.getErrorCorrectPolynomial=function(t){for(var r=k([1],0),e=0;e<t;e+=1)r=r.multiply(k([1,C.gexp(e)],0));return r},o.getLengthInBits=function(t,r){if(1<=r&&r<10)switch(t){case a:return 10;case u:return 9;case f:case c:return 8;default:throw"mode:"+t}else if(r<27)switch(t){case a:return 12;case u:return 11;case f:return 16;case c:return 10;default:throw"mode:"+t}else{if(!(r<41))throw"type:"+r;switch(t){case a:return 14;case u:return 13;case f:return 16;case c:return 12;default:throw"mode:"+t}}},o.getLostPoint=function(t){for(var r=t.getModuleCount(),e=0,n=0;n<r;n+=1)for(var o=0;o<r;o+=1){for(var i=0,a=t.isDark(n,o),u=-1;u<=1;u+=1)if(!(n+u<0||r<=n+u))for(var f=-1;f<=1;f+=1)o+f<0||r<=o+f||0==u&&0==f||a==t.isDark(n+u,o+f)&&(i+=1);i>5&&(e+=3+i-5)}for(n=0;n<r-1;n+=1)for(o=0;o<r-1;o+=1){var c=0;t.isDark(n,o)&&(c+=1),t.isDark(n+1,o)&&(c+=1),t.isDark(n,o+1)&&(c+=1),t.isDark(n+1,o+1)&&(c+=1),0!=c&&4!=c||(e+=3)}for(n=0;n<r;n+=1)for(o=0;o<r-6;o+=1)t.isDark(n,o)&&!t.isDark(n,o+1)&&t.isDark(n,o+2)&&t.isDark(n,o+3)&&t.isDark(n,o+4)&&!t.isDark(n,o+5)&&t.isDark(n,o+6)&&(e+=40);for(o=0;o<r;o+=1)for(n=0;n<r-6;n+=1)t.isDark(n,o)&&!t.isDark(n+1,o)&&t.isDark(n+2,o)&&t.isDark(n+3,o)&&t.isDark(n+4,o)&&!t.isDark(n+5,o)&&t.isDark(n+6,o)&&(e+=40);var g=0;for(o=0;o<r;o+=1)for(n=0;n<r;n+=1)t.isDark(n,o)&&(g+=1);return e+=Math.abs(100*g/r/r-50)/5*10},o),C=function(){for(var t=new Array(256),r=new Array(256),e=0;e<8;e+=1)t[e]=1<<e;for(e=8;e<256;e+=1)t[e]=t[e-4]^t[e-5]^t[e-6]^t[e-8];for(e=0;e<255;e+=1)r[t[e]]=e;var n={glog:function(t){if(t<1)throw"glog("+t+")";return r[t]},gexp:function(r){for(;r<0;)r+=255;for(;r>=256;)r-=255;return t[r]}};return n}();function k(t,r){if(void 0===t.length)throw t.length+"/"+r;var e=function(){for(var e=0;e<t.length&&0==t[e];)e+=1;for(var n=new Array(t.length-e+r),o=0;o<t.length-e;o+=1)n[o]=t[o+e];return n}(),n={getAt:function(t){return e[t]},getLength:function(){return e.length},multiply:function(t){for(var r=new Array(n.getLength()+t.getLength()-1),e=0;e<n.getLength();e+=1)for(var o=0;o<t.getLength();o+=1)r[e+o]^=C.gexp(C.glog(n.getAt(e))+C.glog(t.getAt(o)));return k(r,0)},mod:function(t){if(n.getLength()-t.getLength()<0)return n;for(var r=C.glog(n.getAt(0))-C.glog(t.getAt(0)),e=new Array(n.getLength()),o=0;o<n.getLength();o+=1)e[o]=n.getAt(o);for(o=0;o<t.getLength();o+=1)e[o]^=C.gexp(C.glog(t.getAt(o))+r);return k(e,0).mod(t)}};return n}var A=function(){var t=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12,7,37,13],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],r=function(t,r){var e={};return e.totalCount=t,e.dataCount=r,e},e={};return e.getRSBlocks=function(e,n){var o=function(r,e){switch(e){case g.L:return t[4*(r-1)+0];case g.M:return t[4*(r-1)+1];case g.Q:return t[4*(r-1)+2];case g.H:return t[4*(r-1)+3];default:return}}(e,n);if(void 0===o)throw"bad rs block @ typeNumber:"+e+"/errorCorrectionLevel:"+n;for(var i=o.length/3,a=[],u=0;u<i;u+=1)for(var f=o[3*u+0],c=o[3*u+1],l=o[3*u+2],h=0;h<f;h+=1)a.push(r(c,l));return a},e}(),b=function(){var t=[],r=0,e={getBuffer:function(){return t},getAt:function(r){var e=Math.floor(r/8);return 1==(t[e]>>>7-r%8&1)},put:function(t,r){for(var n=0;n<r;n+=1)e.putBit(1==(t>>>r-n-1&1))},getLengthInBits:function(){return r},putBit:function(e){var n=Math.floor(r/8);t.length<=n&&t.push(0),e&&(t[n]|=128>>>r%8),r+=1}};return e},M=function(t){var r=a,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+2<r.length;)t.put(o(r.substring(n,n+3)),10),n+=3;n<r.length&&(r.length-n==1?t.put(o(r.substring(n,n+1)),4):r.length-n==2&&t.put(o(r.substring(n,n+2)),7))}},o=function(t){for(var r=0,e=0;e<t.length;e+=1)r=10*r+i(t.charAt(e));return r},i=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);throw"illegal char :"+t};return n},x=function(t){var r=u,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+1<r.length;)t.put(45*o(r.charAt(n))+o(r.charAt(n+1)),11),n+=2;n<r.length&&t.put(o(r.charAt(n)),6)}},o=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);if("A"<=t&&t<="Z")return t.charCodeAt(0)-"A".charCodeAt(0)+10;switch(t){case" ":return 36;case"$":return 37;case"%":return 38;case"*":return 39;case"+":return 40;case"-":return 41;case".":return 42;case"/":return 43;case":":return 44;default:throw"illegal char :"+t}};return n},m=function(r){var e=f,n=t.stringToBytes(r),o={getMode:function(){return e},getLength:function(t){return n.length},write:function(t){for(var r=0;r<n.length;r+=1)t.put(n[r],8)}};return o},L=function(r){var e=c,n=t.stringToBytesFuncs.SJIS;if(!n)throw"sjis not supported.";!function(){var t=n("友");if(2!=t.length||38726!=(t[0]<<8|t[1]))throw"sjis not supported."}();var o=n(r),i={getMode:function(){return e},getLength:function(t){return~~(o.length/2)},write:function(t){for(var r=o,e=0;e+1<r.length;){var n=(255&r[e])<<8|255&r[e+1];if(33088<=n&&n<=40956)n-=33088;else{if(!(57408<=n&&n<=60351))throw"illegal char at "+(e+1)+"/"+n;n-=49472}n=192*(n>>>8&255)+(255&n),t.put(n,13),e+=2}if(e<r.length)throw"illegal char at "+(e+1)}};return i},D=function(){var t=[],r={writeByte:function(r){t.push(255&r)},writeShort:function(t){r.writeByte(t),r.writeByte(t>>>8)},writeBytes:function(t,e,n){e=e||0,n=n||t.length;for(var o=0;o<n;o+=1)r.writeByte(t[o+e])},writeString:function(t){for(var e=0;e<t.length;e+=1)r.writeByte(t.charCodeAt(e))},toByteArray:function(){return t},toString:function(){var r="";r+="[";for(var e=0;e<t.length;e+=1)e>0&&(r+=","),r+=t[e];return r+="]"}};return r},S=function(t){var r=t,e=0,n=0,o=0,i={read:function(){for(;o<8;){if(e>=r.length){if(0==o)return-1;throw"unexpected end of file./"+o}var t=r.charAt(e);if(e+=1,"="==t)return o=0,-1;t.match(/^\s$/)||(n=n<<6|a(t.charCodeAt(0)),o+=6)}var i=n>>>o-8&255;return o-=8,i}},a=function(t){if(65<=t&&t<=90)return t-65;if(97<=t&&t<=122)return t-97+26;if(48<=t&&t<=57)return t-48+52;if(43==t)return 62;if(47==t)return 63;throw"c:"+t};return i},I=function(t,r,e){for(var n=function(t,r){var e=t,n=r,o=new Array(t*r),i={setPixel:function(t,r,n){o[r*e+t]=n},write:function(t){t.writeString("GIF87a"),t.writeShort(e),t.writeShort(n),t.writeByte(128),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(255),t.writeByte(255),t.writeByte(255),t.writeString(","),t.writeShort(0),t.writeShort(0),t.writeShort(e),t.writeShort(n),t.writeByte(0);var r=a(2);t.writeByte(2);for(var o=0;r.length-o>255;)t.writeByte(255),t.writeBytes(r,o,255),o+=255;t.writeByte(r.length-o),t.writeBytes(r,o,r.length-o),t.writeByte(0),t.writeString(";")}},a=function(t){for(var r=1<<t,e=1+(1<<t),n=t+1,i=u(),a=0;a<r;a+=1)i.add(String.fromCharCode(a));i.add(String.fromCharCode(r)),i.add(String.fromCharCode(e));var f,c,g,l=D(),h=(f=l,c=0,g=0,{write:function(t,r){if(t>>>r!=0)throw"length over";for(;c+r>=8;)f.writeByte(255&(t<<c|g)),r-=8-c,t>>>=8-c,g=0,c=0;g|=t<<c,c+=r},flush:function(){c>0&&f.writeByte(g)}});h.write(r,n);var s=0,v=String.fromCharCode(o[s]);for(s+=1;s<o.length;){var d=String.fromCharCode(o[s]);s+=1,i.contains(v+d)?v+=d:(h.write(i.indexOf(v),n),i.size()<4095&&(i.size()==1<<n&&(n+=1),i.add(v+d)),v=d)}return h.write(i.indexOf(v),n),h.write(e,n),h.flush(),l.toByteArray()},u=function(){var t={},r=0,e={add:function(n){if(e.contains(n))throw"dup key:"+n;t[n]=r,r+=1},size:function(){return r},indexOf:function(r){return t[r]},contains:function(r){return void 0!==t[r]}};return e};return i}(t,r),o=0;o<r;o+=1)for(var i=0;i<t;i+=1)n.setPixel(i,o,e(i,o));var a=D();n.write(a);for(var u=function(){var t=0,r=0,e=0,n="",o={},i=function(t){n+=String.fromCharCode(a(63&t))},a=function(t){if(t<0);else{if(t<26)return 65+t;if(t<52)return t-26+97;if(t<62)return t-52+48;if(62==t)return 43;if(63==t)return 47}throw"n:"+t};return o.writeByte=function(n){for(t=t<<8|255&n,r+=8,e+=1;r>=6;)i(t>>>r-6),r-=6},o.flush=function(){if(r>0&&(i(t<<6-r),t=0,r=0),e%3!=0)for(var o=3-e%3,a=0;a<o;a+=1)n+="="},o.toString=function(){return n},o}(),f=a.toByteArray(),c=0;c<f.length;c+=1)u.writeByte(f[c]);return u.flush(),"data:image/gif;base64,"+u};return t}();qrcode.stringToBytesFuncs["UTF-8"]=function(t){return function(t){for(var r=[],e=0;e<t.length;e++){var n=t.charCodeAt(e);n<128?r.push(n):n<2048?r.push(192|n>>6,128|63&n):n<55296||n>=57344?r.push(224|n>>12,128|n>>6&63,128|63&n):(e++,n=65536+((1023&n)<<10|1023&t.charCodeAt(e)),r.push(240|n>>18,128|n>>12&63,128|n>>6&63,128|63&n))}return r}(t)},function(t){"function"==typeof define&&define.amd?define([],t):"object"==typeof exports&&(module.exports=t())}(function(){return qrcode});
+function qrSvg(txt, taille){
+  try{
+    const qr=qrcode(0,"M"); qr.addData(String(txt)); qr.make();
+    const n=qr.getModuleCount(), t=taille||96;
+    let r="";
+    for(let y=0;y<n;y++) for(let x=0;x<n;x++) if(qr.isDark(y,x)) r+='<rect x="'+x+'" y="'+y+'" width="1" height="1"/>';
+    return '<svg class="cqr" viewBox="0 0 '+n+' '+n+'" width="'+t+'" height="'+t+'" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"><rect width="'+n+'" height="'+n+'" fill="#fff"/><g fill="#000">'+r+"</g></svg>";
+  }catch(e){ return ""; }
+}
+const C39={"0":"nnnwwnwnn","1":"wnnwnnnnw","2":"nnwwnnnnw","3":"wnwwnnnnn","4":"nnnwwnnnw","5":"wnnwwnnnn","6":"nnwwwnnnn","7":"nnnwnnwnw","8":"wnnwnnwnn","9":"nnwwnnwnn","A":"wnnnnwnnw","B":"nnwnnwnnw","C":"wnwnnwnnn","D":"nnnnwwnnw","E":"wnnnwwnnn","F":"nnwnwwnnn","G":"nnnnnwwnw","H":"wnnnnwwnn","I":"nnwnnwwnn","J":"nnnnwwwnn","K":"wnnnnnnww","L":"nnwnnnnww","M":"wnwnnnnwn","N":"nnnnwnnww","O":"wnnnwnnwn","P":"nnwnwnnwn","Q":"nnnnnnwww","R":"wnnnnnwwn","S":"nnwnnnwwn","T":"nnnnwnwwn","U":"wwnnnnnnw","V":"nwwnnnnnw","W":"wwwnnnnnn","X":"nwnnwnnnw","Y":"wwnnwnnnn","Z":"nwwnwnnnn","-":"nwnnnnwnw",".":"wwnnnnwnn"," ":"nwwnnnwnn","*":"nwnnwnwnn"};
+function barcode39(txt, h){
+  h=h||44;
+  const chars=("*"+String(txt).toUpperCase().replace(/[^0-9A-Z\-\. ]/g,"")+"*").split("");
+  let x=0, bars=[];
+  for(const ch of chars){
+    const pat=C39[ch]; if(!pat) continue;
+    for(let i=0;i<9;i++){ const wdt=pat[i]==="w"?3:1; if(i%2===0) bars.push([x,wdt]); x+=wdt; }
+    x+=1; /* espace inter-caractère */
+  }
+  const W=x-1;
+  return `<svg class="cbar" viewBox="0 0 ${W} ${h}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">${
+    bars.map(([bx,bw])=>`<rect x="${bx}" y="0" width="${bw}" height="${h}" fill="#000"/>`).join("")}</svg>`;
+}
+function carteHtml(c){
+  const dm=c.demobilisation;
+  const qr=cfg("carteQR")!==false?qrSvg("PNDDRR|"+dm.carte+"|"+authCode(c),48):"";
+  const cb=cfg("carteCodeBarres")!==false?`${barcode39(dm.carte,22)}<div class="cbar-lbl">${esc(dm.carte)}</div>`:"";
+  return `
+    <div class="carte-pvc recto">
+      <div class="ch chc"><div class="emb">${ARM_SVG}</div>
+        <div class="tx">
+          <b>RÉPUBLIQUE CENTRAFRICAINE</b>
+          <small>UEPNDDR</small>
+          <div class="ct">CARTE DE DÉMOBILISÉ</div>
+          <small>N° ${esc(dm.carte)}</small>
+        </div>
+      </div>
+      <div class="cb">
+        <div class="ph">${c.photo?`<img src="${c.photo}">`:"PHOTO"}</div>
+        <table>
+          <tr><td>Nom</td><td>${esc(c.nom)}</td></tr>
+          <tr><td>Prénom(s)</td><td>${esc(c.prenom)}</td></tr>
+          <tr><td>Né(e) le</td><td>${fmtD(c.dn)}</td></tr>
+          <tr><td>Sexe</td><td>${c.sexe==="M"?"M":"F"}</td></tr>
+          <tr><td>Dossier</td><td>${esc(c.num)}</td></tr>
+          <tr><td>Démobilisé</td><td>${fmtD(dm.date)}</td></tr>
+        </table>
+      </div>
+      <div class="cauth">AUTH. <b>${authCode(c)}</b></div>
+      <div class="cf"><span>${esc(dm.lieu)}</span><span>${esc(cfg("signataireCarte")||"Le Coordonnateur")}</span></div>
+    </div>
+    <div class="carte-pvc verso">
+      <div class="ch"><b>DISPOSITIONS</b></div>
+      <div class="cb verso-body">
+        <p>Carte personnelle attestant la démobilisation officielle au titre du PNDDRR. En cas de perte, prévenir l'antenne la plus proche.</p>
+        ${qr||cb?`<div class="cbar-box">${qr?`<div class="cqr-wrap">${qr}</div>`:""}${cb?`<div class="cbar-wrap">${cb}</div>`:""}</div>`:""}
+      </div>
+      <div class="cf"><span>N° ${esc(dm.carte)}</span><span>République Centrafricaine</span></div>
+    </div>`;
+}
+function printCarte(id){
+  const c=DB.combattants.find(x=>x.id===id);
+  if(!c.auditRemise||!c.auditRemise.photo){
+    toast("Enregistrez d'abord la photo d'audit (combattant avec l'argent reçu) dans Distribution de kits.");
+    if(typeof mAuditRemise==="function") mAuditRemise(id);
+    else go("kits");
+    return;
+  }
+  doPrint(carteHtml(c), "pvc");
+  log("Impression",`Carte de démobilisé ${c.demobilisation.carte}`);
+}
+var DOC_Q="";
+function docSearch(v){
+  DOC_Q=v;
+  if(VIEW==="kits") rKits(); else rDocs();
+  const el=$("doc_q"); if(el){ el.focus(); const n=el.value.length; try{el.setSelectionRange(n,n);}catch(e){} }
+}
+function docMatch(c){
+  const q=DOC_Q.trim().toLowerCase(); if(!q) return true;
+  return [c.num,c.nom,c.prenom,c.alias,c.vague,c.prefecture,c.groupe,c.demobilisation?c.demobilisation.carte:""].join(" ").toLowerCase().includes(q);
+}
+function docsContenuHtml(){
+  const cartes=DB.combattants.filter(c=>c.demobilisation&&docMatch(c)).sort((a,b)=>a.demobilisation.carte.localeCompare(b.demobilisation.carte));
+  const attests=DB.combattants.filter(c=>c.desarmement&&docMatch(c)).sort((a,b)=>a.num.localeCompare(b.num));
+  return `
+  <div class="toolbar">
+    <div class="field" style="flex:1;max-width:520px"><label>Recherche</label><input id="doc_q" value="${esc(DOC_Q)}" oninput="docSearch(this.value)" placeholder="Nom, n° dossier, n° de carte, vague, préfecture…"></div>
+    ${DOC_Q?`<button class="btn ghost" style="align-self:end" onclick="DOC_Q='';${VIEW==="kits"?"rKits":"rDocs"}()">✕ Effacer</button>`:""}
+  </div>
+  <div class="cards">
+    <div class="kpi c-dem"><div class="n">${cartes.length}</div><div class="l">Cartes de démobilisé délivrées</div></div>
+    <div class="kpi c-des"><div class="n">${attests.length}</div><div class="l">Attestations de désarmement</div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Vérifier l'authenticité d'une carte</h3></div><div class="pb">
+    <div class="toolbar" style="margin-bottom:0">
+      <div class="field" style="max-width:230px"><label>N° de carte</label><input id="ver_num" placeholder="DEM-2026-0001"></div>
+      <div class="field" style="max-width:230px"><label>Code d'authentification</label><input id="ver_code" placeholder="XXXX-XXXX-XXXX"></div>
+      <button class="btn" style="align-self:end" onclick="verifCarte()">Vérifier</button>
+    </div>
+    <div id="verRes" style="margin-top:12px"></div>
+    <p class="small muted" style="margin-top:10px">Le code figure au recto de chaque carte. La vérification fonctionne hors ligne, sur tout poste disposant de l'application, et est consignée au journal.</p>
+  </div></div>
+  <div class="panel"><div class="ph"><h3>Partie 1 — Cartes de démobilisé (${cartes.length})</h3>
+    <span style="display:flex;gap:7px">
+      <button class="btn sm sec" onclick="exportCartesCSV()">Exporter CSV</button>
+      <button class="btn sm sec" ${cartes.length?"":"disabled"} onclick="printToutesCartes()">Imprimer toutes les cartes</button>
+    </span></div>
+    <p class="small muted" style="margin:0;padding:10px 16px 0">Impression : <b>8,5 × 5,5 cm</b> (carte PVC, une face par page). Dans la boîte d'impression, choisir le format 85 × 55 mm et les marges à zéro.</p>
+    <div class="pb nopad">${
+    cartes.length?`<table><thead><tr><th>N° de carte</th><th>Titulaire</th><th>Dossier</th><th>Démobilisé le</th><th>Lieu</th><th>Vague</th><th>Actions</th></tr></thead><tbody>${
+      cartes.map(c=>`<tr><td><b>${esc(c.demobilisation.carte)}</b></td>
+      <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
+      <td>${c.num}</td><td>${fmtD(c.demobilisation.date)}</td><td class="small">${esc(c.demobilisation.lieu)}</td>
+      <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
+      <td class="actions-cell"><button class="btn sm sec" onclick="printCarte('${c.id}')">${c.auditRemise&&c.auditRemise.photo?"Voir / imprimer":"Photo d'audit requise"}</button></td></tr>`).join("")
+    }</tbody></table>`:`<div class="empty">Aucune carte de démobilisé${DOC_Q?" ne correspond à la recherche":" délivrée pour le moment"}.</div>`}</div></div>
+  <div class="panel"><div class="ph"><h3>Partie 2 — Attestations de désarmement (${attests.length})</h3>
+    <span style="display:flex;gap:7px">
+      <button class="btn sm sec" onclick="exportAttestsCSV()">Exporter CSV</button>
+      <button class="btn sm sec" ${attests.length?"":"disabled"} onclick="printToutesAttests()">Imprimer toutes les attestations</button>
+    </span></div><div class="pb nopad">${
+    attests.length?`<table><thead><tr><th>Dossier</th><th>Titulaire</th><th>Désarmé le</th><th>Lieu</th><th>Armes</th><th>Munitions</th><th>Vague</th><th>Actions</th></tr></thead><tbody>${
+      attests.map(c=>`<tr><td><b>${c.num}</b></td>
+      <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
+      <td>${fmtD(c.desarmement.date)}</td><td class="small">${esc(c.desarmement.lieu)}</td>
+      <td>${c.desarmement.armes.length}</td><td>${(c.desarmement.munitions||[]).length}</td>
+      <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
+      <td class="actions-cell"><button class="btn sm sec" onclick="printAttestation('${c.id}')">Voir / imprimer l'attestation</button></td></tr>`).join("")
+    }</tbody></table>`:`<div class="empty">Aucune attestation${DOC_Q?" ne correspond à la recherche":" — les attestations sont produites au désarmement"}.</div>`}</div></div>`;
+}
+function rDocs(){
+  $("view").innerHTML = `<div class="panel"><div class="ph"><h3>Cartes &amp; attestations</h3></div><div class="pb">${docsContenuHtml()}</div></div>`;
+}
+function savePoste(){
+  DB.poste=$("posteNom").value.trim();
+  DB.posteCode=$("posteCodeInp").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5);
+  persist(); log("Synchronisation",`Poste : ${DB.poste||"(vide)"} — code ${DB.posteCode||"(aucun)"}`);
+  toast("Identification du poste enregistrée."); rSauvegarde();
+}
+function genSecret(){
+  openModal(DB.secret?"Renouveler le secret d'installation":"Générer le secret d'installation", `
+    <p>Le secret est une clé aléatoire propre à votre installation. ${DB.secret?"Le renouveler change les codes des <b>futures</b> cartes ; les cartes déjà imprimées restent vérifiables (repli sur les codes antérieurs au secret).":"Une fois généré, les nouveaux codes d'authentification en dépendent."}</p>
+    <p class="small muted" style="margin-top:8px">Pensez à exporter une sauvegarde JSON vers les autres postes après cette opération, afin qu'ils vérifient les mêmes codes.</p>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="doGenSecret()">Générer</button>`);
+}
+function doGenSecret(){
+  if(CUR.role!=="admin"){ toast("Réservé à l'administrateur."); return; }
+  let al="ABCDEFGHJKLMNPQRSTUVWXYZ23456789", sec="";
+  const rnd=new Uint32Array(24);
+  try{ crypto.getRandomValues(rnd); }catch(e){ for(let i=0;i<24;i++) rnd[i]=Math.floor(Math.random()*4294967296); }
+  for(let i=0;i<24;i++) sec+=al[rnd[i]%al.length];
+  DB.secret=sec; persist();
+  log("Sécurité","Secret d'installation "+(DB.secret?"renouvelé":"généré"));
+  closeModal(); toast("Secret d'installation enregistré."); rSauvegarde();
+}
+function verifCarte(){
+  const num=$("ver_num").value.trim().toUpperCase();
+  const code=$("ver_code").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if(!num||!code){ toast("Saisissez le n° de carte et le code d'authentification."); return; }
+  const c=DB.combattants.find(x=>x.demobilisation&&x.demobilisation.carte.toUpperCase()===num);
+  /* accepte le code du secret courant, ou l'ancien pour les cartes imprimées avant sa définition */
+  const ok = c && (authCode(c).replace(/-/g,"")===code || authCode(c,true).replace(/-/g,"")===code);
+  if(!c){
+    $("verRes").innerHTML=`<div style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:12px"><b style="color:var(--danger)">✘ Carte inconnue.</b> Aucune carte n° <b>${esc(num)}</b> n'existe dans ce registre. Vérifiez le numéro ou synchronisez les données du poste émetteur.</div>`;
+  } else if(!ok){
+    $("verRes").innerHTML=`<div style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:12px"><b style="color:var(--danger)">✘ Code invalide.</b> Le code saisi ne correspond pas à la carte n° <b>${esc(num)}</b>. La carte présentée est susceptible d'être falsifiée — retenir la carte et en référer à l'UEPNDDR.</div>`;
+  } else {
+    $("verRes").innerHTML=`<div style="background:#EAF7EE;border:1px solid #9ED0AC;border-radius:8px;padding:12px;display:flex;gap:14px;align-items:center">
+      <div style="width:64px;height:76px;border:1px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted);overflow:hidden">${c.photo?`<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover">`:"Photo"}</div>
+      <div><b style="color:var(--ok)">✔ Carte authentique.</b><br>
+      <b>${esc(c.nom)} ${esc(c.prenom)}</b>${c.alias?` — alias « ${esc(c.alias)} »`:""}, ${c.sexe==="M"?"né":"née"} le ${fmtD(c.dn)}<br>
+      <span class="small">Dossier ${c.num} · démobilisé(e) le ${fmtD(c.demobilisation.date)} à ${esc(c.demobilisation.lieu)} · statut actuel : <span class="badge st-${c.statut}">${STATUTS[c.statut].lbl}</span></span><br>
+      <span class="link small" onclick="go('fiche','${c.id}')">Ouvrir le dossier complet</span></div></div>`;
+  }
+  log("Vérification de carte",`${num} — ${!c?"carte inconnue":ok?"authentique ("+c.num+")":"code invalide"}`);
+}
+function exportCartesCSV(){
+  const rows=[["N° de carte","Nom","Prénom","N° dossier","Démobilisé le","Lieu","Vague","Groupe armé","Préfecture"]];
+  DB.combattants.filter(c=>c.demobilisation&&docMatch(c)).forEach(c=>rows.push([c.demobilisation.carte,c.nom,c.prenom,c.num,c.demobilisation.date,c.demobilisation.lieu,c.vague||"",c.groupe,c.prefecture]));
+  dl(`pnddrr_cartes_demobilise_${today()}.csv`, csv(rows), "text/csv"); log("Export CSV","Cartes de démobilisé");
+}
+function exportAttestsCSV(){
+  const rows=[["N° dossier","Nom","Prénom","Désarmé le","Lieu","Armes","Lots de munitions","Vague","Groupe armé","Préfecture"]];
+  DB.combattants.filter(c=>c.desarmement&&docMatch(c)).forEach(c=>rows.push([c.num,c.nom,c.prenom,c.desarmement.date,c.desarmement.lieu,c.desarmement.armes.length,(c.desarmement.munitions||[]).length,c.vague||"",c.groupe,c.prefecture]));
+  dl(`pnddrr_attestations_desarmement_${today()}.csv`, csv(rows), "text/csv"); log("Export CSV","Attestations de désarmement");
+}
+function printToutesCartes(){
+  const L=DB.combattants.filter(c=>c.demobilisation&&docMatch(c));
+  doPrint(L.map(c=>carteHtml(c)).join(""), "pvc");
+  log("Impression",`${L.length} carte(s) de démobilisé (lot)`);
+}
+function printToutesAttests(){
+  const L=DB.combattants.filter(c=>c.desarmement&&docMatch(c));
+  doPrint(L.map(c=>attestationHtml(c)).join('<div style="page-break-after:always"></div>'));
+  log("Impression",`${L.length} attestation(s) de désarmement (lot)`);
+}
+function printRegArmes(){
+  const A=allArmes(), MU=allMunitions();
+  doPrint(docWrap(`${docEntete("Registre des armes et matériels collectés")}
+    <h2 class="titre">Registre des armes collectées</h2>
+    <p class="small">Arrêté au ${new Date().toLocaleDateString("fr-FR")} — ${A.length} arme(s) et lot(s) enregistrés.</p>
+    <table class="dt"><tr><th>N°</th><th>Type</th><th>Marque</th><th>N° série</th><th>État</th><th>Garde</th><th>Remise par</th><th>Dossier</th><th>Date</th></tr>${
+      A.map((a,i)=>`<tr><td>${i+1}</td><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${GARDE_LBL[(a.garde&&a.garde.etat)||"depot"]}${a.garde&&a.garde.scelle?" · "+esc(a.garde.scelle):""}${a.garde&&a.garde.destruction&&a.garde.destruction.pv?" · "+esc(a.garde.destruction.pv):""}</td><td>${esc(a.nom)}</td><td>${a.num}</td><td>${fmtD(a.date)}</td></tr>`).join("")}</table>
+    ${MU.length?`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Munitions et explosifs collectés (${MU.length} lot(s))</h3>
+    <table class="dt"><tr><th>N°</th><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Remise par</th><th>Dossier</th><th>Date</th></tr>${
+      MU.map((m,i)=>`<tr><td>${i+1}</td><td>${esc(m.nature)||"—"}</td><td>${fmtN(m.qte)}</td><td>${esc(m.unite)}</td><td>${esc(m.nom)}</td><td>${m.num}</td><td>${fmtD(m.date)}</td></tr>`).join("")}</table>`:""}
+    <div class="sig"><div class="c"></div><div class="c">Fait à ${esc(cfg("villeSignature")||"Bangui")}, le ${new Date().toLocaleDateString("fr-FR")}<br>Pour le PNDDRR<div class="ligne">${esc(CUR.nom)}</div></div></div>`));
+  log("Impression","Registre des armes");
+}
+
+
+
+/* module: operations/kits.js — PNDDRR engine (classic globals) */
+/* Distribution de kits + cartes et attestations (audit photo avant impression) */
+var KIT_Q = "";
+
+function kitMatch(c) {
+  const q = KIT_Q.trim().toLowerCase();
+  if (!q) return true;
+  return [c.num, c.nom, c.prenom, c.vague, c.prefecture].join(" ").toLowerCase().includes(q);
+}
+
+function rKits() {
+  const eligible = DB.combattants.filter((c) => c.demobilisation && c.medecine && c.medecine.verdict === "apte" && kitMatch(c));
+  const withAudit = eligible.filter((c) => c.auditRemise && c.auditRemise.photo);
+  const sansAudit = eligible.filter((c) => !c.auditRemise || !c.auditRemise.photo);
+
+  $("view").innerHTML = `
+  <div class="panel"><div class="ph"><h3>Distribution de kits</h3><span class="muted small">Opération</span></div>
+  <div class="pb">
+    <p>Remise des kits et délivrance des cartes. <b>Avant toute impression de carte</b>, enregistrez la photo d'audit : le combattant filmé avec l'argent reçu (preuve de perception).</p>
+  </div></div>
+  <div class="toolbar">
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="kit_q" value="${esc(KIT_Q)}" oninput="KIT_Q=this.value;rKits()" placeholder="Nom, n° dossier, n° carte…"></div>
+  </div>
+  <div class="cards">
+    <div class="kpi c-rm"><div class="n">${sansAudit.length}</div><div class="l">Cartes sans photo d'audit</div></div>
+    <div class="kpi c-ok"><div class="n">${withAudit.length}</div><div class="l">Prêts à imprimer la carte</div></div>
+  </div>
+  <div class="panel"><div class="ph"><h3>Photo d'audit — remise d'argent (${sansAudit.length})</h3></div><div class="pb nopad">${
+    sansAudit.length
+      ? `<table><thead><tr><th>Carte</th><th>Titulaire</th><th>Démobilisé le</th><th>Actions</th></tr></thead><tbody>${sansAudit
+          .map(
+            (c) => `<tr><td><b>${esc(c.demobilisation.carte)}</b></td>
+      <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
+      <td>${fmtD(c.demobilisation.date)}</td>
+      <td><button class="btn sm" onclick="mAuditRemise('${c.id}')">Enregistrer la photo d'audit</button></td></tr>`
+          )
+          .join("")}</tbody></table>`
+      : `<div class="empty">Toutes les cartes éligibles disposent d'une photo d'audit, ou aucune carte en attente.</div>`
+  }</div></div>
+  <div class="panel"><div class="ph"><h3>Cartes &amp; attestations</h3></div><div class="pb">${docsContenuHtml()}</div></div>`;
+}
+
+function mAuditRemise(id) {
+  const c = DB.combattants.find((x) => x.id === id);
+  if (!c) return;
+  openModal(
+    `Photo d'audit — ${c.num}`,
+    `
+    <p class="small muted">Photographiez ou importez l'image du combattant <b>avec l'argent reçu</b> avant d'imprimer sa carte.</p>
+    <div class="field"><label>Montant perçu (FCFA)</label><input type="number" min="0" id="aud_montant" value="${c.auditRemise && c.auditRemise.montant ? c.auditRemise.montant : ""}"></div>
+    <div class="photo-box" id="audBox" style="margin:12px auto;max-width:280px">${c.auditRemise && c.auditRemise.photo ? `<img src="${c.auditRemise.photo}">` : "Photo<br>d'audit"}</div>
+    <input type="file" id="audFile" accept="image/*" capture="environment" style="font-size:12px;border:none;padding:0">
+    <div class="field" style="margin-top:10px"><label>Observations</label><textarea id="aud_obs" rows="2">${esc((c.auditRemise && c.auditRemise.obs) || "")}</textarea></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveAuditRemise('${id}')">Enregistrer</button>`
+  );
+  window._auditPhoto = (c.auditRemise && c.auditRemise.photo) || null;
+  $("audFile").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      window._auditPhoto = r.result;
+      $("audBox").innerHTML = `<img src="${window._auditPhoto}">`;
+    };
+    r.readAsDataURL(f);
+  });
+}
+
+function saveAuditRemise(id) {
+  const c = DB.combattants.find((x) => x.id === id);
+  if (!c) return;
+  if (!window._auditPhoto) {
+    toast("La photo d'audit est obligatoire.");
+    return;
+  }
+  c.auditRemise = {
+    date: today(),
+    agent: CUR.nom,
+    photo: window._auditPhoto,
+    montant: $("aud_montant").value ? +$("aud_montant").value : null,
+    obs: $("aud_obs").value.trim(),
+  };
+  log("Audit remise", `${c.num} — photo d'audit enregistrée${c.auditRemise.montant ? " (" + fmtN(c.auditRemise.montant) + " FCFA)" : ""}`);
+  closeModal();
+  toast("Photo d'audit enregistrée — la carte peut être imprimée.");
+  rKits();
+}
 
 /* module: combattants/registre.js — PNDDRR engine (classic globals) */
 /* ================= REGISTRE ================= */
@@ -1155,467 +2499,6 @@ function rJalons(){
     aC.length?`<table><thead><tr><th>N° dossier</th><th>Nom & prénom</th><th>Voie</th><th>Détail</th><th>Promotion</th><th>Formation</th><th>Intégration</th><th>Clôturé le</th></tr></thead><tbody>${aC.map(c=>ligne(c,true)).join("")}</tbody></table>`
     :`<div class="empty">Aucun parcours clôturé.</div>`}</div></div>`;
 }
-
-
-/* module: combattants/fiche.js — PNDDRR engine (classic globals) */
-/* ================= FICHE INDIVIDUELLE ================= */
-function stepsHtml(c){
-  const order=["enregistre","desarme","demobilise","reint","reintegre"];
-  const cur = c.statut==="reintegration_militaire"||c.statut==="reintegration_socio" ? "reint" : c.statut;
-  const idx = c.statut==="abandon" ? -1 : order.indexOf(cur);
-  const lbl = {enregistre:"1. Enregistrement",desarme:"2. Désarmement",demobilise:"3. Démobilisation",reint:"4. Réintégration",reintegre:"5. Réintégré"};
-  let h = order.map((s,i)=>`<div class="step click ${idx>i?"done":idx===i?"now":""}" title="Cliquer pour le détail de cette étape" onclick="stepInfo('${c.id}','${s}')">${lbl[s]}</div>`).join("");
-  if(c.statut==="abandon") h+=`<div class="step ab click" title="Cliquer pour le détail" onclick="stepInfo('${c.id}','abandon')">Abandon</div>`;
-  return `<div class="steps">${h}</div>`;
-}
-function stepInfo(id, step){
-  const c=DB.combattants.find(x=>x.id===id); if(!c) return;
-  const order=["enregistre","desarme","demobilise","reint","reintegre"];
-  const cur = c.statut==="reintegration_militaire"||c.statut==="reintegration_socio" ? "reint" : c.statut;
-  const idx = c.statut==="abandon" ? -1 : order.indexOf(cur);
-  const i=order.indexOf(step);
-  const etat = step==="abandon" ? "" : idx>i?`<span class="badge st-reintegre">Étape accomplie</span>` : idx===i?`<span class="badge st-demobilise">Étape en cours</span>` : `<span class="badge st-enregistre">Étape à venir</span>`;
-  const L=(k,v)=>`<tr><td style="width:210px;color:var(--muted);font-weight:600">${k}</td><td>${v}</td></tr>`;
-  const T=rows=>`<table style="background:transparent">${rows.join("")}</table>`;
-  let titre="", corps="", pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button>`;
-  if(step==="enregistre"){
-    titre="1. Enregistrement";
-    corps=T([L("Dossier ouvert le",fmtD(c.creele.slice(0,10))+" par "+esc(c.agent)),
-      L("Vague d'enregistrement",c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"),
-      L("Localisation",`${esc(c.prefecture)} (région ${regionOf(c.prefecture)})${c.sousPref?" — "+esc(c.sousPref):""}${c.commune?" — "+esc(c.commune):""}${c.site?" · site : "+esc(c.site):""}`),
-      L("Groupe armé d'origine",esc(c.groupe)+(c.grade?" · "+esc(c.grade):"")),
-      L("Souhait exprimé",esc(c.souhait))]);
-  } else if(step==="desarme"){
-    titre="2. Désarmement";
-    corps=c.desarmement?T([L("Désarmé le",fmtD(c.desarmement.date)+" à "+esc(c.desarmement.lieu)),
-      L("Matériel réceptionné par",esc(c.desarmement.agent)),
-      L("Armes remises",c.desarmement.armes.length?c.desarmement.armes.map(a=>`${esc(a.type)}${a.serie?" ("+esc(a.serie)+")":""} — ${esc(a.etat)}`).join("<br>"):"Aucune"),
-      L("Munitions / explosifs",(c.desarmement.munitions||[]).length?c.desarmement.munitions.map(m=>`${fmtN(m.qte)} ${esc(m.unite)}${m.nature?" — "+esc(m.nature):""}`).join("<br>"):"—")])
-      :`<p class="muted">Le désarmement n'a pas encore eu lieu. Il consiste en la remise des armes et munitions contre attestation, et fait passer le dossier au statut « Désarmé ».</p>`;
-    if(c.desarmement) pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn sec" onclick="closeModal();printAttestation('${c.id}')">Attestation de désarmement</button>`;
-  } else if(step==="demobilise"){
-    titre="3. Démobilisation";
-    corps=c.demobilisation?T([L("Prononcée le",fmtD(c.demobilisation.date)+" à "+esc(c.demobilisation.lieu)),
-      L("Carte de démobilisé",`<b>${esc(c.demobilisation.carte)}</b>`)])
-      :`<p class="muted">La démobilisation n'a pas encore été prononcée. Elle acte la sortie officielle du groupe armé et donne lieu à la délivrance d'une carte de démobilisé (l'orientation en réintégration reste possible dès le désarmement).</p>`;
-    if(c.demobilisation) pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn sec" onclick="closeModal();printCarte('${c.id}')">Carte de démobilisé</button>`;
-  } else if(step==="reint"){
-    titre="4. Réintégration";
-    const r=reintOf(c);
-    if(!r) corps=`<p class="muted">Aucune orientation prononcée pour l'instant. L'ex-combattant sera orienté vers la voie militaire (incorporation dans les forces) ou socio-économique (formation professionnelle et appui à l'installation).</p>`;
-    else{
-      const rows=[L("Voie",c.reintMil?"Militaire":"Socio-économique"),L("Orientation prononcée le",fmtD(r.date))];
-      if(c.reintMil){ rows.push(L("Corps / unité",esc(c.reintMil.corps)+(c.reintMil.unite?" · "+esc(c.reintMil.unite):"")),L("Matricule",esc(c.reintMil.matricule)||"—"),L("Formation initiale",esc(c.reintMil.formation)||"—")); }
-      else{ rows.push(L("Filière",esc(c.reintSocio.filiere)+(c.reintSocio.centre?" · "+esc(c.reintSocio.centre):"")),L("Kit / appui",(c.reintSocio.kit?"Kit remis":"Kit non remis")+(c.reintSocio.appui?" · "+fmtN(c.reintSocio.appui)+" FCFA":"")),L("Visites de suivi",String((c.reintSocio.visites||[]).length))); }
-      if(r.promo) rows.push(L("Promotion / vague",`<span class="tag">${esc(r.promo)}</span>`));
-      const [bF,bV]=jalonBadge(c);
-      rows.push(L("Formation",bF+(r.formNote?` <span class="small muted">${esc(r.formNote)}</span>`:"")),L("Intégration à la vie "+(c.reintMil?"militaire":"civile"),bV+(r.vieDetail?` <span class="small muted">${esc(r.vieDetail)}</span>`:"")));
-      corps=T(rows);
-    }
-  } else if(step==="reintegre"){
-    titre="5. Réintégré";
-    corps=c.statut==="reintegre"?T([L("Parcours achevé le",fmtD(c.fin)),
-      L("Situation",c.reintMil?"Intégré à la vie militaire"+(reintOf(c).vieDetail?" — "+esc(reintOf(c).vieDetail):""):"Intégré à la vie civile"+(reintOf(c).vieDetail?" — "+esc(reintOf(c).vieDetail):""))])
-      :`<p class="muted">La clôture interviendra au terme du parcours de réintégration, une fois la formation achevée et l'intégration à la vie militaire ou civile confirmée.</p>`;
-    if(c.statut==="reintegre") pied=`<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn sec" onclick="closeModal();printParcours('${c.id}')">Relevé du parcours</button>`;
-  } else if(step==="abandon"){
-    titre="Abandon du processus";
-    corps=T([L("Déclaré le",fmtD(c.abandon.date)),L("Motif",esc(c.abandon.motif)||"—")]);
-  }
-  openModal(`${titre} — dossier ${c.num}`, `<div style="margin-bottom:10px">${etat}</div>${corps}`, pied);
-}
-function parcoursEvents(c){
-  const ev=[];
-  const add=(date,titre,detail,cls)=>{ if(date) ev.push({date:String(date).slice(0,10),titre,detail,cls}); };
-  add(c.creele,"Enregistrement (désarmement — étape 1)",`Dossier ${c.num} ouvert par ${c.agent}${c.vague?" · vague "+c.vague:""}${c.site?" · site de "+c.site:""}`,"enregistre");
-  if(c.desarmement){
-    const d=c.desarmement, nm=(d.munitions||[]).length;
-    add(d.date,"Désarmement — remise du matériel",`${d.armes.length} arme(s)${nm?` et ${nm} lot(s) de munitions`:""} réceptionnée(s) à ${d.lieu}${d.armes.length?" : "+d.armes.map(a=>a.type+(a.serie?" ("+a.serie+")":"")).join(", "):""}`,"desarme");
-  }
-  if(c.demobilisation) add(c.demobilisation.date,"Démobilisation prononcée",`Carte ${c.demobilisation.carte} délivrée à ${c.demobilisation.lieu}`,"demobilise");
-  if(c.reintMil) add(c.reintMil.date,"Orientation — réintégration militaire",`${c.reintMil.corps}${c.reintMil.unite?" · "+c.reintMil.unite:""}${c.reintMil.matricule?" · matricule "+c.reintMil.matricule:""}${c.reintMil.promo?" · promotion "+c.reintMil.promo:""}${c.reintMil.formation?" · "+c.reintMil.formation:""}`,"reintegration_militaire");
-  if(c.reintSocio){
-    add(c.reintSocio.date,"Orientation — réintégration socio-économique",`Filière ${c.reintSocio.filiere}${c.reintSocio.centre?" · "+c.reintSocio.centre:""}${c.reintSocio.duree?" · "+c.reintSocio.duree:""}${c.reintSocio.promo?" · promotion "+c.reintSocio.promo:""}`,"reintegration_socio");
-    if(c.reintSocio.kit) add(c.reintSocio.kitDate||c.reintSocio.date,"Kit de réinstallation remis","","reintegration_socio");
-    if(c.reintSocio.appui) add(c.reintSocio.date,"Appui financier accordé",fmtN(c.reintSocio.appui)+" FCFA","reintegration_socio");
-    (c.reintSocio.visites||[]).forEach(v=>add(v.date,"Visite de suivi",`Appréciation : ${v.appr}${v.obs?" — "+v.obs:""} (${v.agent})`,"reintegration_socio"));
-  }
-  const r=reintOf(c);
-  if(r){
-    if(r.formFin) add(r.formFin,"Fin de la formation "+(c.reintMil?"initiale":"professionnelle"),r.formNote||"","reintegre");
-    if(r.vieDate) add(r.vieDate,c.reintMil?"Intégration à la vie militaire":"Intégration à la vie civile",r.vieDetail||"","reintegre");
-  }
-  if(c.rapatriement) add(c.rapatriement.date,"Rapatriement vers le pays d'origine",`${c.rapatriement.pays}${c.rapatriement.convoi?" · "+c.rapatriement.convoi:""}${c.rapatriement.autorites?" · remise : "+c.rapatriement.autorites:""}`,"rapatrie");
-  if(c.fin&&c.statut!=="rapatrie") add(c.fin,"Clôture — réintégration achevée","Fin du parcours de réintégration","reintegre");
-  if(c.abandon) add(c.abandon.date,"Abandon du processus",c.abandon.motif||"","abandon");
-  return ev.sort((a,b)=>a.date.localeCompare(b.date));
-}
-function rFiche(id){
-  const c = DB.combattants.find(x=>x.id===id); if(!c){ go("registre"); return; }
-  FICHE_ID=id;
-  $("pageTitle").textContent = `Dossier ${c.num}`;
-  const A = hasPerm("enregistrer");
-  const rowsInfo = [
-    ["Nom & prénom(s)", `${esc(c.nom)} ${esc(c.prenom)}${c.alias?` — alias « ${esc(c.alias)} »`:""}`],
-    ["Sexe / âge", `${c.sexe==="M"?"Masculin":"Féminin"} · ${age(c.dn)} ans (né(e) le ${fmtD(c.dn)} à ${esc(c.ln)||"—"})${estMineur(c)?' <span class="badge" style="background:#FCEBD8;color:#9A5B00" title="Enfant associé aux forces et groupes armés — la voie militaire est bloquée">Mineur (EAFGA)</span>':""}`],
-    ["Nationalité / téléphone", `${esc(c.nat)} · ${esc(c.tel)||"—"}`],
-    ["Situation familiale / instruction", `${esc(c.fam)} · ${esc(c.instr)}`],
-    ["Localisation", `${esc(c.prefecture)} (région ${regionOf(c.prefecture)})${c.sousPref?" — S/P "+esc(c.sousPref):""}${c.commune?" — commune de "+esc(c.commune):""}${c.site?" · Site : "+esc(c.site):""}`],
-    ["Vague d'enregistrement", c.vague?esc(c.vague):"—"],
-    ["Groupe armé d'origine", `${esc(c.groupe)}${c.grade?" · "+esc(c.grade):""}${c.annees?" · "+c.annees+" an(s)":""}`],
-    ["Zone d'opération", esc(c.zone)||"—"],
-    ["Souhait de réintégration", esc(c.souhait)],
-    ["Observations", esc(c.obs)||"—"],
-    ["Dossier ouvert", `${fmtD(c.creele.slice(0,10))} par ${esc(c.agent)}`]
-  ];
-  let h = stepsHtml(c);
-  h += `<div class="panel"><div class="ph"><h3>Identité — <span class="badge st-${c.statut}">${STATUTS[c.statut].lbl}</span></h3>
-    <div style="display:flex;gap:7px">
-      ${A?`<button class="btn sm sec" onclick="rNouveau('${c.id}')">Modifier</button>`:""}
-      <button class="btn sm sec" onclick="printFiche('${c.id}')">Imprimer la fiche</button>
-      ${hasPerm("cloturer")&&c.statut!=="abandon"&&c.statut!=="reintegre"?`<button class="btn sm danger" onclick="markAbandon('${c.id}')">Déclarer abandon</button>`:""}
-    </div></div>
-    <div class="pb" style="display:flex;gap:18px">
-      <div class="photo-box">${c.photo?`<img src="${c.photo}">`:"Photo"}</div>
-      <table style="background:transparent">${rowsInfo.map(r=>`<tr><td style="width:240px;color:var(--muted);font-weight:600">${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>
-    </div></div>`;
-
-  /* --- Étape désarmement --- */
-  h += `<div class="panel"><div class="ph"><h3>Étape 2 — Désarmement</h3>${
-    c.statut==="enregistre"&&hasPerm("desarmer")?`<button class="btn sm" onclick="mDesarmement('${c.id}')">Procéder au désarmement</button>`:
-    c.desarmement?`<button class="btn sm sec" onclick="printAttestation('${c.id}')">Attestation de désarmement</button>`:""
-  }</div><div class="pb${c.desarmement?" nopad":""}">${
-    c.desarmement ? `<table><thead><tr><th>Type</th><th>Marque / modèle</th><th>Calibre</th><th>N° de série</th><th>État</th><th>Munitions</th></tr></thead><tbody>${
-      c.desarmement.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${esc(a.mun)||"—"}</td></tr>`).join("")
-    }</tbody></table>${(c.desarmement.munitions||[]).length?`<div style="padding:8px 16px 0"><b class="small" style="color:var(--teal-dark);text-transform:uppercase">Munitions et explosifs</b></div>
-    <table><thead><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th></tr></thead><tbody>${
-      c.desarmement.munitions.map(m=>`<tr><td>${esc(m.nature)||"—"}</td><td>${fmtN(m.qte)}</td><td>${esc(m.unite)}</td><td class="small">${esc(m.obs)||"—"}</td></tr>`).join("")
-    }</tbody></table>`:""}<div style="padding:10px 16px" class="small muted">Désarmé le ${fmtD(c.desarmement.date)} à ${esc(c.desarmement.lieu)} — matériel réceptionné par ${esc(c.desarmement.agent)}.</div>`
-    : `<span class="muted">En attente — l'intéressé n'a pas encore remis d'armement.</span>`
-  }</div></div>`;
-
-  /* --- Étape démobilisation --- */
-  h += `<div class="panel"><div class="ph"><h3>Étape 3 — Démobilisation</h3>${
-    c.statut==="desarme"&&hasPerm("demobiliser")?`<button class="btn sm" onclick="mDemobilisation('${c.id}')">Prononcer la démobilisation</button>`:
-    c.demobilisation?`<button class="btn sm sec" onclick="printCarte('${c.id}')">Carte de démobilisé</button>`:""
-  }</div><div class="pb">${
-    c.demobilisation ? `Démobilisé le <b>${fmtD(c.demobilisation.date)}</b> — carte n° <span class="tag">${c.demobilisation.carte}</span> délivrée à ${esc(c.demobilisation.lieu)}.`
-    : `<span class="muted">En attente — la démobilisation peut être prononcée après la remise des armes${["reintegration_militaire","reintegration_socio"].includes(c.statut)?" (l'intéressé a été orienté directement en réintégration)":""}.</span>`
-  }</div></div>`;
-
-  /* --- Étape réintégration --- */
-  h += `<div class="panel"><div class="ph"><h3>Étape 4 — Réintégration</h3>${
-    (c.statut==="demobilise"||c.statut==="desarme")&&hasPerm("orienter")?`<span style="display:flex;gap:7px"><button class="btn sm" onclick="mReintMil('${c.id}')">Orientation militaire</button><button class="btn sm sec" onclick="mReintSocio('${c.id}')">Orientation socio-économique</button><button class="btn sm ghost" title="Combattant étranger : retour vers le pays d'origine" onclick="mRapatriement('${c.id}')">Rapatriement</button></span>`:""
-  }</div><div class="pb">`;
-  if(c.reintMil){
-    const r=c.reintMil;
-    h+=`<b style="color:#5A2E96">Réintégration militaire</b><table style="background:transparent;margin-top:6px">
-      <tr><td style="width:240px;color:var(--muted);font-weight:600">Corps d'incorporation</td><td>${esc(r.corps)}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Unité d'affectation</td><td>${esc(r.unite)||"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Matricule</td><td>${r.matricule?`<span class="tag">${esc(r.matricule)}</span>`:"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Date d'incorporation</td><td>${fmtD(r.date)}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Formation initiale</td><td>${esc(r.formation)||"—"}</td></tr></table>
-    ${jalonsFiche(c)}`;
-  } else if(c.reintSocio){
-    const r=c.reintSocio;
-    h+=`<b style="color:#8A5400">Réintégration socio-économique</b><table style="background:transparent;margin-top:6px">
-      <tr><td style="width:240px;color:var(--muted);font-weight:600">Filière choisie</td><td>${esc(r.filiere)}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Centre / structure de formation</td><td>${esc(r.centre)||"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Durée de formation</td><td>${esc(r.duree)||"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Kit de réinstallation</td><td>${r.kit?"Remis le "+fmtD(r.kitDate):"Non remis"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Appui financier</td><td>${r.appui?fmtN(r.appui)+" FCFA":"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Début du parcours</td><td>${fmtD(r.date)}</td></tr></table>
-    ${jalonsFiche(c)}
-      <h3 style="font-size:13px;color:var(--teal-dark);margin:14px 0 8px;text-transform:uppercase">Visites de suivi (${r.visites.length})</h3>
-      ${r.visites.length?`<table><thead><tr><th>Date</th><th>Agent</th><th>Appréciation</th><th>Observations</th></tr></thead><tbody>${
-        r.visites.map(v=>`<tr><td>${fmtD(v.date)}</td><td>${esc(v.agent)}</td><td>${esc(v.appr)}</td><td>${esc(v.obs)}</td></tr>`).join("")
-      }</tbody></table>`:`<span class="muted small">Aucune visite de suivi enregistrée.</span>`}
-      ${(c.statut==="reintegration_socio"&&hasPerm("visites"))?`<div style="margin-top:10px"><button class="btn sm sec" onclick="mVisite('${c.id}')">Ajouter une visite de suivi</button></div>`:""}`;
-  } else if(c.rapatriement){
-    const r=c.rapatriement;
-    h+=`<b style="color:#274B8F">Rapatriement — combattant étranger</b><table style="background:transparent;margin-top:6px">
-      <tr><td style="width:240px;color:var(--muted);font-weight:600">Pays de retour</td><td>${esc(r.pays)}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Rapatrié le</td><td>${fmtD(r.date)}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Convoi / point de passage</td><td>${esc(r.convoi)||"—"}</td></tr>
-      <tr><td style="color:var(--muted);font-weight:600">Remise aux autorités</td><td>${esc(r.autorites)||"—"}</td></tr>
-      ${r.obs?`<tr><td style="color:var(--muted);font-weight:600">Observations</td><td>${esc(r.obs)}</td></tr>`:""}</table>`;
-  } else {
-    h+=`<span class="muted">En attente — l'orientation est possible dès le désarmement${c.souhait&&c.souhait!=="Indécis"?` (souhait exprimé : ${esc(c.souhait)})`:""}.</span>`;
-  }
-  h+=`</div></div>`;
-
-  /* --- Clôture --- */
-  h += `<div class="panel"><div class="ph"><h3>Étape 5 — Clôture du parcours</h3>${
-    ["reintegration_militaire","reintegration_socio"].includes(c.statut)&&hasPerm("cloturer")?`<button class="btn sm" onclick="markReintegre('${c.id}')">Déclarer la réintégration achevée</button>`:""
-  }</div><div class="pb">${
-    c.statut==="rapatrie"?`<b style="color:#274B8F">Rapatrié le ${fmtD(c.fin)}</b> vers ${esc(c.rapatriement.pays)} — dossier clos au titre du rapatriement.`
-    : c.statut==="reintegre"?`<b style="color:var(--ok)">Parcours achevé le ${fmtD(c.fin)}.</b> L'intéressé est considéré comme pleinement réintégré.`
-    : c.statut==="abandon"?`<b style="color:var(--danger)">Abandon déclaré le ${fmtD(c.abandon.date)}.</b> Motif : ${esc(c.abandon.motif)}`
-    : `<span class="muted">Le dossier sera clôturé au terme du parcours de réintégration.</span>`
-  }</div></div>`;
-
-  /* --- Chronologie complète --- */
-  const ev=parcoursEvents(c);
-  h += `<div class="panel"><div class="ph"><h3>Parcours complet — du désarmement à la fin de la réintégration (${ev.length} étape(s))</h3>
-    <button class="btn sm sec" onclick="printParcours('${c.id}')">Imprimer le parcours</button></div>
-    <div class="pb"><div class="chrono">${
-      ev.map(e=>`<div class="ch-item"><span class="ch-dot st-${e.cls}"></span>
-        <div class="ch-date">${fmtD(e.date)}</div>
-        <div class="ch-body"><b>${esc(e.titre)}</b>${e.detail?`<div class="small muted">${esc(e.detail)}</div>`:""}</div></div>`).join("")
-    }</div></div></div>`;
-  $("view").innerHTML = h;
-}
-function printParcours(id){
-  const c=DB.combattants.find(x=>x.id===id); const ev=parcoursEvents(c);
-  doPrint(docWrap(`${docEntete("Relevé chronologique du parcours DDR")}
-    <h2 class="titre">Parcours complet — dossier ${c.num}</h2>
-    <p><b>${esc(c.nom)} ${esc(c.prenom)}</b>${c.alias?` (alias « ${esc(c.alias)} »)`:""}, ${c.sexe==="M"?"né":"née"} le ${fmtD(c.dn)}, groupe d'origine ${esc(c.groupe)}, ${esc(c.prefecture)}${c.vague?", vague "+esc(c.vague):""}. Statut actuel : <b>${STATUTS[c.statut].lbl}</b>. Relevé arrêté au ${new Date().toLocaleDateString("fr-FR")}.</p>
-    <table class="dt"><tr><th style="width:90px">Date</th><th>Étape du processus</th><th>Détail</th></tr>${
-      ev.map(e=>`<tr><td>${fmtD(e.date)}</td><td><b>${esc(e.titre)}</b></td><td>${esc(e.detail)||"—"}</td></tr>`).join("")}</table>
-    <div class="sig"><div class="c"></div><div class="c">Fait à ${esc(cfg("villeSignature")||"Bangui")}, le ${new Date().toLocaleDateString("fr-FR")}<br>Pour le PNDDRR<div class="ligne">${esc(CUR.nom)}</div></div></div>`));
-  log("Impression",`Relevé de parcours ${c.num}`);
-}
-
-/* ---------- Actions du circuit ---------- */
-const UNITES_MUN=["cartouches","chargeurs","bandes","caisses","grenades","roquettes","obus","kg d'explosif","autre"];
-function munRow(){
-  return `<tr class="munRow"><td><input class="m_nature" placeholder="Nature / calibre (ex. : 7,62×39 mm)"></td>
-  <td><input class="m_qte" type="number" min="0" style="width:90px" placeholder="Qté"></td>
-  <td><select class="m_unite">${UNITES_MUN.map(u=>`<option>${u}</option>`).join("")}</select></td>
-  <td><input class="m_obs" placeholder="Observations"></td>
-  <td><button type="button" class="btn sm ghost" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
-}
-function armeRow(i){
-  return `<tr class="armeRow"><td><select class="a_type">${TYPES_ARMES.map(t=>`<option>${t}</option>`).join("")}</select></td>
-  <td><input class="a_marque" placeholder="Marque / modèle"></td><td><input class="a_calibre" placeholder="Calibre" style="width:90px"></td>
-  <td><input class="a_serie" placeholder="N° série"></td>
-  <td><select class="a_etat"><option>Fonctionnelle</option><option>Défectueuse</option><option>Hors d'usage</option></select></td>
-  <td><input class="a_mun" placeholder="Munitions" style="width:90px"></td>
-  <td><button type="button" class="btn sm ghost" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
-}
-function mDesarmement(id){
-  openModal("Procès-verbal de désarmement", `
-    <div class="grid2"><div class="field"><label>Date de remise</label><input type="date" id="d_date" value="${today()}"></div>
-    <div class="field"><label>Lieu / site de collecte</label><input id="d_lieu"></div></div>
-    <label>Armement et matériel remis</label>
-    <table id="tArmes"><thead><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th><th>Munitions</th><th></th></tr></thead>
-    <tbody>${armeRow(0)}</tbody></table>
-    <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tArmes tbody').insertAdjacentHTML('beforeend', armeRow())">+ Ajouter une arme</button>
-    <h3 style="color:var(--teal-dark);margin:16px 0 8px;font-size:13px;text-transform:uppercase">Munitions et explosifs remis</h3>
-    <table id="tMun"><thead><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th><th></th></tr></thead>
-    <tbody></tbody></table>
-    <button type="button" class="btn sm sec" style="margin-top:8px" onclick="document.querySelector('#tMun tbody').insertAdjacentHTML('beforeend', munRow())">+ Ajouter des munitions</button>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveDesarmement('${id}')">Valider le désarmement</button>`);
-}
-function saveDesarmement(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  const armes=[...document.querySelectorAll("#tArmes tbody tr")].map(tr=>({
-    type:tr.querySelector(".a_type").value, marque:tr.querySelector(".a_marque").value.trim(),
-    calibre:tr.querySelector(".a_calibre").value.trim(), serie:tr.querySelector(".a_serie").value.trim(),
-    etat:tr.querySelector(".a_etat").value, mun:tr.querySelector(".a_mun").value.trim()
-  }));
-  const munitions=[...document.querySelectorAll("#tMun tbody tr")].map(tr=>({
-    nature:tr.querySelector(".m_nature").value.trim(), qte:+tr.querySelector(".m_qte").value||0,
-    unite:tr.querySelector(".m_unite").value, obs:tr.querySelector(".m_obs").value.trim()
-  })).filter(m=>m.nature||m.qte);
-  if(!armes.length&&!munitions.length){ toast("Ajoutez au moins une arme ou un lot de munitions."); return; }
-  c.desarmement={date:$("d_date").value||today(), lieu:$("d_lieu").value.trim()||c.site||c.prefecture, agent:CUR.nom, armes, munitions};
-  c.statut="desarme";
-  log("Désarmement",`${c.num} — ${armes.length} arme(s) et ${munitions.length} lot(s) de munitions réceptionnés`);
-  closeModal(); toast("Désarmement enregistré."); rFiche(id);
-}
-function mDemobilisation(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  openModal("Démobilisation", `
-    <p class="small muted" style="margin-bottom:12px">La validation attribue automatiquement un numéro de carte de démobilisé.</p>
-    <div class="grid2"><div class="field"><label>Date de démobilisation</label><input type="date" id="dm_date" value="${today()}"></div>
-    <div class="field"><label>Lieu de délivrance</label><input id="dm_lieu" value="${esc(c.prefecture)}"></div></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveDemob('${id}')">Prononcer la démobilisation</button>`);
-}
-function saveDemob(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  c.demobilisation={date:$("dm_date").value||today(), lieu:$("dm_lieu").value.trim(), carte:numDem()};
-  c.statut="demobilise";
-  log("Démobilisation",`${c.num} — carte ${c.demobilisation.carte}`);
-  closeModal(); toast(`Carte ${c.demobilisation.carte} délivrée.`); rFiche(id);
-}
-function estMineur(c){ const a=age(c.dn); return a!=="—" && a<18; }
-function mReintMil(id){
-  const cM=DB.combattants.find(x=>x.id===id);
-  if(cM && estMineur(cM)){
-    openModal("Orientation militaire impossible — mineur (EAFGA)", `
-      <p><b>${esc(cM.nom)} ${esc(cM.prenom)}</b> a <b>${age(cM.dn)} ans</b>. Conformément aux standards du DDR et à la protection de l'enfance, un mineur (enfant associé aux forces et groupes armés — EAFGA) <b>ne peut pas être orienté vers la voie militaire</b>.</p>
-      <p class="small muted" style="margin-top:8px">Orientez ce dossier vers la voie socio-économique (scolarisation, formation, réunification familiale), en liaison avec les services de protection de l'enfance.</p>`,
-      `<button class="btn ghost" onclick="closeModal()">Fermer</button><button class="btn" onclick="closeModal();mReintSocio('${cM.id}')">Orientation socio-économique</button>`);
-    return;
-  }
-  openModal("Orientation — réintégration militaire", `
-    <div class="grid2">
-    <div class="field"><label>Corps d'incorporation</label><select id="rm_corps">${CORPS.map(x=>`<option>${x}</option>`).join("")}</select></div>
-    <div class="field"><label>Unité d'affectation</label><input id="rm_unite"></div>
-    <div class="field"><label>Matricule attribué <span class="muted" style="font-weight:400">(optionnel)</span></label><input id="rm_mat" placeholder="Laissé vide en formation"></div>
-    <div class="field"><label>Date d'incorporation</label><input type="date" id="rm_date" value="${today()}"></div>
-    <div class="field"><label>Formation initiale prévue</label><input id="rm_form" placeholder="Ex. : formation commune de base — camp Kassaï"></div>
-    <div class="field"><label>Promotion / vague de formation</label><input id="rm_promo" list="promoList" value="${esc((DB.combattants.find(x=>x.id===id)||{}).vague||"")}" placeholder="Ex. : Vague 2026-A"><datalist id="promoList">${promosConnues().map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveReintMil('${id}')">Valider l'orientation</button>`);
-}
-function saveReintMil(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  c.reintMil={corps:$("rm_corps").value, unite:$("rm_unite").value.trim(), matricule:$("rm_mat").value.trim(), date:$("rm_date").value||today(), formation:$("rm_form").value.trim(), promo:$("rm_promo").value.trim()||c.vague||""};
-  c.statut="reintegration_militaire";
-  log("Réintégration militaire",`${c.num} — ${c.reintMil.corps}${c.reintMil.matricule?", matricule "+c.reintMil.matricule:""}`);
-  closeModal(); toast("Orientation militaire enregistrée."); rFiche(id);
-}
-function mReintSocio(id){
-  openModal("Orientation — réintégration socio-économique", `
-    <div class="grid2">
-    <div class="field"><label>Filière</label><select id="rs_fil">${FILIERES.map(x=>`<option>${x}</option>`).join("")}</select></div>
-    <div class="field"><label>Centre / structure de formation</label><input id="rs_centre"></div>
-    <div class="field"><label>Durée de formation</label><input id="rs_duree" placeholder="Ex. : 6 mois"></div>
-    <div class="field"><label>Début du parcours</label><input type="date" id="rs_date" value="${today()}"></div>
-    <div class="field"><label>Kit de réinstallation remis ?</label><select id="rs_kit"><option value="">Non</option><option value="1">Oui</option></select></div>
-    <div class="field"><label>Date de remise du kit</label><input type="date" id="rs_kitdate"></div>
-    <div class="field"><label>Appui financier (FCFA)</label><input type="number" min="0" id="rs_appui"></div>
-    <div class="field"><label>Promotion / vague de formation</label><input id="rs_promo" list="promoList" value="${esc((DB.combattants.find(x=>x.id===id)||{}).vague||"")}" placeholder="Ex. : Promotion Couture 2026-1"><datalist id="promoList">${promosConnues().map(p=>`<option>${esc(p)}</option>`).join("")}</datalist></div></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveReintSocio('${id}')">Valider l'orientation</button>`);
-}
-function saveReintSocio(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  c.reintSocio={filiere:$("rs_fil").value, centre:$("rs_centre").value.trim(), duree:$("rs_duree").value.trim(),
-    date:$("rs_date").value||today(), kit:!!$("rs_kit").value, kitDate:$("rs_kitdate").value, appui:$("rs_appui").value, promo:$("rs_promo").value.trim()||c.vague||"", visites:[]};
-  c.statut="reintegration_socio";
-  log("Réintégration socio-économique",`${c.num} — filière ${c.reintSocio.filiere}`);
-  closeModal(); toast("Orientation socio-économique enregistrée."); rFiche(id);
-}
-function mRapatriement(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  openModal("Rapatriement — combattant étranger", `
-    <p class="small muted" style="margin-bottom:12px">Voie prévue pour les combattants étrangers : retour vers le pays d'origine, en liaison avec les autorités de ce pays et les partenaires (MINUSCA, OIM…). Nationalité déclarée : <b>${esc(c.nat)}</b>.</p>
-    <div class="grid2">
-      <div class="field"><label>Pays de retour *</label><input id="rp_pays" value="${normTxt(c.nat).includes("centrafric")?"":esc(c.nat)}" placeholder="Ex. : Tchad, Soudan…"></div>
-      <div class="field"><label>Date de rapatriement</label><input type="date" id="rp_date" value="${today()}"></div>
-      <div class="field"><label>Convoi / vol / point de passage</label><input id="rp_convoi" placeholder="Ex. : convoi OIM n° 12 — Am-Dafock"></div>
-      <div class="field"><label>Autorités de remise</label><input id="rp_autorites" placeholder="Ex. : autorités tchadiennes — poste de Sido"></div>
-    </div>
-    <div class="field"><label>Observations</label><textarea id="rp_obs" rows="2"></textarea></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveRapatriement('${id}')">Confirmer le rapatriement</button>`);
-}
-function saveRapatriement(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  if(!$("rp_pays").value.trim()){ toast("Le pays de retour est obligatoire."); return; }
-  c.rapatriement={pays:$("rp_pays").value.trim(), date:$("rp_date").value||today(), convoi:$("rp_convoi").value.trim(), autorites:$("rp_autorites").value.trim(), obs:$("rp_obs").value.trim()};
-  c.fin=c.rapatriement.date; c.statut="rapatrie";
-  log("Rapatriement",`${c.num} — vers ${c.rapatriement.pays}${c.rapatriement.convoi?" ("+c.rapatriement.convoi+")":""}`);
-  closeModal(); toast("Rapatriement enregistré — dossier clos."); rFiche(id);
-}
-function mVisite(id){
-  openModal("Visite de suivi", `
-    <div class="grid2"><div class="field"><label>Date de la visite</label><input type="date" id="v_date" value="${today()}"></div>
-    <div class="field"><label>Appréciation</label><select id="v_appr"><option>Satisfaisant</option><option>Moyen</option><option>Préoccupant</option></select></div></div>
-    <div class="field"><label>Observations</label><textarea id="v_obs" rows="3"></textarea></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveVisite('${id}')">Enregistrer la visite</button>`);
-}
-function saveVisite(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  c.reintSocio.visites.push({date:$("v_date").value||today(), agent:CUR.nom, appr:$("v_appr").value, obs:$("v_obs").value.trim()});
-  log("Visite de suivi",`${c.num} — appréciation : ${$("v_appr").value}`);
-  closeModal(); toast("Visite enregistrée."); rFiche(id);
-}
-function reintOf(c){ return c.reintMil||c.reintSocio||null; }
-function jalonsFiche(c){
-  const r=reintOf(c); if(!r) return "";
-  const mil=!!c.reintMil;
-  const [bF,bV]=jalonBadge(c);
-  const enCours=["reintegration_militaire","reintegration_socio"].includes(c.statut);
-  const P=hasPerm("orienter");
-  return `<h3 style="font-size:13px;color:var(--teal-dark);margin:14px 0 8px;text-transform:uppercase">Jalons du parcours</h3>
-  <table style="background:transparent">
-    ${r.promo?`<tr><td style="width:240px;color:var(--muted);font-weight:600">Promotion / vague</td><td colspan="2"><span class="tag">${esc(r.promo)}</span></td></tr>`:""}
-    <tr><td style="width:240px;color:var(--muted);font-weight:600">Formation ${mil?"initiale":"professionnelle"}</td>
-      <td>${bF}${r.formFin&&r.formNote?` <span class="small muted">${esc(r.formNote)}</span>`:""}</td>
-      <td style="text-align:right">${enCours&&!r.formFin&&P?`<button class="btn sm sec" onclick="mFormationFin('${c.id}')">Valider la fin de formation</button>`:""}</td></tr>
-    <tr><td style="color:var(--muted);font-weight:600">Intégration à la vie ${mil?"militaire":"civile"}</td>
-      <td>${bV}${r.vieDate&&r.vieDetail?` <span class="small muted">${esc(r.vieDetail)}</span>`:""}</td>
-      <td style="text-align:right">${enCours&&!r.vieDate&&P?`<button class="btn sm sec" onclick="mIntegration('${c.id}')">Confirmer l'intégration</button>`:""}</td></tr>
-  </table>
-  ${enCours&&(!r.formFin||!r.vieDate)?`<div class="small muted" style="margin-top:6px">La clôture du parcours est recommandée une fois la formation achevée et l'intégration à la vie ${mil?"militaire":"civile"} confirmée.</div>`:""}`;
-}
-function jalonBadge(c){
-  const r=reintOf(c); if(!r) return ["",""];
-  const mil=!!c.reintMil;
-  const form=r.formFin?`<span class="badge st-reintegre" title="${esc(r.formNote||"")}">Achevée le ${fmtD(r.formFin)}</span>`:`<span class="badge st-demobilise">En cours</span>`;
-  const vie=r.vieDate?`<span class="badge st-reintegre" title="${esc(r.vieDetail||"")}">${mil?"Vie militaire":"Vie civile"} · ${fmtD(r.vieDate)}</span>`:`<span class="badge st-enregistre">En attente</span>`;
-  return [form,vie];
-}
-function mFormationFin(id){
-  const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c); const mil=!!c.reintMil;
-  openModal("Fin de la formation", `
-    <p class="small muted" style="margin-bottom:12px">${mil?`Formation initiale : ${esc(c.reintMil.formation)||"—"} (${esc(c.reintMil.corps)})`:`Formation professionnelle — filière ${esc(c.reintSocio.filiere)}${c.reintSocio.centre?" · "+esc(c.reintSocio.centre):""}`}</p>
-    <div class="grid2">
-      <div class="field"><label>Date d'achèvement</label><input type="date" id="ff_date" value="${today()}"></div>
-      <div class="field"><label>Résultat</label><select id="ff_res"><option>Formation achevée avec succès</option><option>Formation achevée — attestation délivrée</option><option>Formation validée partiellement</option><option>Formation interrompue</option></select></div>
-    </div>
-    <div class="field"><label>Observations</label><textarea id="ff_obs" rows="2"></textarea></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveFormationFin('${id}')">Valider la fin de formation</button>`);
-}
-function saveFormationFin(id){
-  const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c);
-  r.formFin=$("ff_date").value||today();
-  r.formNote=($("ff_res").value+($("ff_obs").value.trim()?" — "+$("ff_obs").value.trim():""));
-  log("Fin de formation",`${c.num} — ${r.formNote}`);
-  closeModal(); toast("Fin de formation enregistrée.");
-  VIEW==="reintegration"?rReint():VIEW==="jalons"?rJalons():rFiche(id);
-}
-function mIntegration(id){
-  const c=DB.combattants.find(x=>x.id===id); const mil=!!c.reintMil;
-  openModal(mil?"Intégration à la vie militaire":"Intégration à la vie civile", `
-    <div class="grid2">
-      <div class="field"><label>Date d'intégration effective</label><input type="date" id="vi_date" value="${today()}"></div>
-      <div class="field"><label>${mil?"Unité rejointe / affectation":"Activité exercée / installation"}</label><input id="vi_det" value="${mil?esc(c.reintMil.unite||""):esc(c.reintSocio.filiere||"")}"></div>
-      ${mil?`<div class="field"><label>Matricule attribué</label><input id="vi_mat" value="${esc(c.reintMil.matricule||"")}" placeholder="Saisi à l'intégration, pas en formation"></div>`:""}
-    </div>
-    <p class="small muted">${mil?"Confirme que l'intéressé a effectivement rejoint son unité et sert au sein des forces. Le matricule peut être renseigné ici s'il n'avait pas été attribué en formation.":"Confirme que l'intéressé exerce effectivement son activité et est installé dans la vie civile."}</p>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveIntegration('${id}')">Confirmer l'intégration</button>`);
-}
-function saveIntegration(id){
-  const c=DB.combattants.find(x=>x.id===id); const r=reintOf(c); const mil=!!c.reintMil;
-  r.vieDate=$("vi_date").value||today();
-  r.vieDetail=$("vi_det").value.trim();
-  if(mil && $("vi_mat")) c.reintMil.matricule=$("vi_mat").value.trim();
-  log("Intégration "+(mil?"vie militaire":"vie civile"),`${c.num}${r.vieDetail?" — "+r.vieDetail:""}${mil&&c.reintMil.matricule?" · matricule "+c.reintMil.matricule:""}`);
-  closeModal(); toast("Intégration confirmée.");
-  VIEW==="reintegration"?rReint():VIEW==="jalons"?rJalons():rFiche(id);
-}
-function markReintegre(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  const r=reintOf(c);
-  const alerte=r&&(!r.formFin||!r.vieDate)?`<div class="small" style="background:#FFF7E0;border:1px solid #E8D48A;border-radius:7px;padding:9px;margin-bottom:10px">⚠ ${!r.formFin?"La fin de formation n'est pas encore validée. ":""}${!r.vieDate?"L'intégration à la vie "+(c.reintMil?"militaire":"civile")+" n'est pas encore confirmée. ":""}La clôture les considérera comme atteintes à la date choisie.</div>`:"";
-  openModal("Clôture du parcours", `${alerte}<p>Confirmer que <b>${esc(c.nom)} ${esc(c.prenom)}</b> (${c.num}) a achevé son parcours de réintégration ?</p>
-    <div class="field" style="margin-top:12px"><label>Date d'achèvement</label><input type="date" id="fin_date" value="${today()}"></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveReintegre('${id}')">Confirmer</button>`);
-}
-function saveReintegre(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  c.fin=$("fin_date").value||today(); c.statut="reintegre";
-  const r=reintOf(c);
-  if(r){ if(!r.formFin){ r.formFin=c.fin; r.formNote=r.formNote||"Considérée achevée à la clôture du parcours"; }
-    if(!r.vieDate){ r.vieDate=c.fin; r.vieDetail=r.vieDetail||(c.reintMil?"Intégration confirmée à la clôture":"Intégration à la vie civile confirmée à la clôture"); } }
-  log("Clôture",`${c.num} — réintégration achevée`);
-  closeModal(); toast("Parcours clôturé — réintégré."); rFiche(id);
-}
-function markAbandon(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  openModal("Déclaration d'abandon", `<p>Déclarer l'abandon du processus par <b>${esc(c.nom)} ${esc(c.prenom)}</b> (${c.num}) ?</p>
-    <div class="field" style="margin-top:12px"><label>Motif</label><textarea id="ab_motif" rows="2" placeholder="Ex. : ne s'est plus présenté au site depuis 3 mois"></textarea></div>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn danger" onclick="saveAbandon('${id}')">Déclarer l'abandon</button>`);
-}
-function saveAbandon(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  c.abandon={date:today(), motif:$("ab_motif").value.trim()||"Non précisé"}; c.statut="abandon";
-  log("Abandon",`${c.num} — ${c.abandon.motif}`);
-  closeModal(); toast("Abandon enregistré."); rFiche(id);
-}
-
 
 
 /* module: armes/armes.js — PNDDRR engine (classic globals) */
@@ -2261,351 +3144,6 @@ function restoreJSON(inp){
     }catch(e){ toast("Fichier de sauvegarde invalide."); }
   };
   r.readAsText(f); inp.value="";
-}
-
-
-
-/* module: documents/docs.js — PNDDRR engine (classic globals) */
-/* ================= DOCUMENTS IMPRIMABLES ================= */
-function docEntete(service){
-  return `<div class="entete">
-    <div class="rep">République Centrafricaine</div>
-    <div class="devise">Unité — Dignité — Travail</div>
-    <div class="armoiries">${ARM_SVG}</div>
-    <div class="min">Unité d'exécution du Programme national de désarmement,<br>démobilisation, réintégration et rapatriement</div>
-    ${service?`<div class="min" style="margin-top:3px;font-size:11.5px">${service}</div>`:""}
-    <div class="trait"></div>
-  </div>`;
-}
-function docWrap(inner){
-  return `<div class="doc"><div class="wm">${ARM_SVG}</div><div class="inner">${inner}</div></div>`;
-}
-function doPrint(html, kind){
-  document.body.classList.toggle("print-pvc", kind==="pvc");
-  const zone=$("printZone");
-  if(zone && zone.parentNode!==document.body) document.body.appendChild(zone);
-  zone.innerHTML = html;
-  zone.className = kind==="pvc" ? "pvc" : "";
-  $("prevBody").innerHTML = html;
-  $("prevBody").className = kind==="pvc" ? "pvc" : "";
-  const ttl=document.querySelector("#printPrev .pp-bar b");
-  if(ttl) ttl.textContent = kind==="pvc" ? "Aperçu carte PVC — 8,5 × 5,5 cm (une face par page)" : "Aperçu du document";
-  $("printPrev").style.display = "flex";
-  document.body.style.overflow = "hidden";
-}
-function prevClose(){
-  $("printPrev").style.display="none";
-  document.body.style.overflow="";
-  document.body.classList.remove("print-pvc");
-  $("prevBody").className="";
-  $("printZone").innerHTML="";
-  $("printZone").className="";
-  const frame=document.getElementById("pnddrrPrintFrame");
-  if(frame) frame.remove();
-}
-function prevPrint(){
-  const pvc=document.body.classList.contains("print-pvc");
-  const markup=($("printZone")&&$("printZone").innerHTML)||($("prevBody")&&$("prevBody").innerHTML);
-  if(!markup){ toast("Rien à imprimer."); return; }
-  let frame=document.getElementById("pnddrrPrintFrame");
-  if(frame) frame.remove();
-  frame=document.createElement("iframe");
-  frame.id="pnddrrPrintFrame";
-  frame.setAttribute("aria-hidden","true");
-  frame.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none";
-  document.body.appendChild(frame);
-  const doc=frame.contentDocument;
-  const headBits=[...document.querySelectorAll("link[rel='stylesheet'], style")].map(n=>n.outerHTML).join("");
-  const page=pvc?"size:85mm 55mm;margin:0":"size:A4 portrait;margin:12mm";
-  doc.open();
-  doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Impression PNDDRR</title>${headBits}
-<style>
-@page{${page}}
-html,body{margin:0!important;padding:0!important;background:#fff!important;height:auto!important;overflow:visible!important}
-body>*:not(#printZone){display:none!important}
-#printZone{display:block!important;visibility:visible!important;position:static!important;left:auto!important;top:auto!important;width:${pvc?"85mm":"auto"}!important;height:auto!important}
-#printZone *{visibility:visible!important}
-</style></head>
-<body class="${pvc?"print-pvc":""}"><div id="printZone" class="${pvc?"pvc":""}">${markup}</div></body></html>`);
-  doc.close();
-  let printed=false;
-  const run=()=>{
-    if(printed) return;
-    printed=true;
-    try{ frame.contentWindow.focus(); frame.contentWindow.print(); }
-    catch(e){ toast("Impression indisponible dans cet aperçu — utilisez Chrome, Edge ou Firefox."); }
-  };
-  const links=[...doc.querySelectorAll("link[rel='stylesheet']")];
-  if(!links.length){ setTimeout(run, 80); return; }
-  let left=links.length;
-  const one=()=>{ left-=1; if(left<=0) setTimeout(run, 80); };
-  links.forEach(l=>{
-    if(l.sheet){ one(); return; }
-    l.addEventListener("load", one);
-    l.addEventListener("error", one);
-  });
-  setTimeout(run, 1200);
-}
-function printFiche(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  const arm = c.desarmement ? `<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Armement remis (${fmtD(c.desarmement.date)} — ${esc(c.desarmement.lieu)})</h3>
-    <table class="dt"><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th><th>Munitions</th></tr>${
-    c.desarmement.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${esc(a.mun)||"—"}</td></tr>`).join("")}</table>${(c.desarmement.munitions||[]).length?`<p style="margin-top:4px"><b>Munitions et explosifs :</b> ${c.desarmement.munitions.map(m=>`${fmtN(m.qte)} ${esc(m.unite)}${m.nature?" ("+esc(m.nature)+")":""}`).join(" ; ")}</p>`:""}` : "";
-  let reint="";
-  if(c.reintMil) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration militaire</h3>
-    <table class="dt"><tr><th>Corps</th><td>${esc(c.reintMil.corps)}</td><th>Matricule</th><td>${esc(c.reintMil.matricule)||"—"}</td></tr>
-    <tr><th>Unité</th><td>${esc(c.reintMil.unite)||"—"}</td><th>Incorporation</th><td>${fmtD(c.reintMil.date)}</td></tr></table>`;
-  if(c.reintSocio) reint=`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Réintégration socio-économique</h3>
-    <table class="dt"><tr><th>Filière</th><td>${esc(c.reintSocio.filiere)}</td><th>Centre</th><td>${esc(c.reintSocio.centre)||"—"}</td></tr>
-    <tr><th>Kit remis</th><td>${c.reintSocio.kit?"Oui — "+fmtD(c.reintSocio.kitDate):"Non"}</td><th>Appui</th><td>${c.reintSocio.appui?fmtN(c.reintSocio.appui)+" FCFA":"—"}</td></tr>
-    <tr><th>Début</th><td>${fmtD(c.reintSocio.date)}</td><th>Visites de suivi</th><td>${c.reintSocio.visites.length}</td></tr></table>`;
-  doPrint(docWrap(`${docEntete("Fiche individuelle d'ex-combattant")}
-    <h2 class="titre">Fiche individuelle n° ${c.num}</h2>
-    <table class="dt">
-      <tr><th style="width:26%">Nom & prénom(s)</th><td>${esc(c.nom)} ${esc(c.prenom)}</td><th style="width:18%">Alias</th><td>${esc(c.alias)||"—"}</td></tr>
-      <tr><th>Sexe</th><td>${c.sexe==="M"?"Masculin":"Féminin"}</td><th>Naissance</th><td>${fmtD(c.dn)} à ${esc(c.ln)||"—"}</td></tr>
-      <tr><th>Nationalité</th><td>${esc(c.nat)}</td><th>Téléphone</th><td>${esc(c.tel)||"—"}</td></tr>
-      <tr><th>Préfecture</th><td>${esc(c.prefecture)}</td><th>Site</th><td>${esc(c.site)||"—"}</td></tr>
-      <tr><th>Groupe armé</th><td>${esc(c.groupe)}</td><th>Fonction</th><td>${esc(c.grade)||"—"}</td></tr>
-      <tr><th>Statut actuel</th><td colspan="3"><b>${STATUTS[c.statut].lbl}</b>${c.demobilisation?` — carte de démobilisé n° ${c.demobilisation.carte}`:""}</td></tr>
-    </table>
-    ${arm}${reint}
-    <div class="sig">
-      <div class="c">L'intéressé(e)<div class="ligne">${esc(c.nom)} ${esc(c.prenom)}</div></div>
-      <div class="c">Fait à ${esc(c.prefecture)}, le ${new Date().toLocaleDateString("fr-FR")}<br>L'agent du PNDDRR<div class="ligne">${esc(CUR.nom)}</div></div>
-    </div>`));
-  log("Impression",`Fiche individuelle ${c.num}`);
-}
-function attestationHtml(c){
-  const d=c.desarmement;
-  return docWrap(`${docEntete("")}
-    <h2 class="titre">Attestation de désarmement</h2>
-    <p>Le Programme National de Désarmement, Démobilisation, Réintégration et Rapatriement atteste que :</p>
-    <p style="text-align:center;font-size:14.5px"><b>${esc(c.nom)} ${esc(c.prenom)}</b>${c.alias?`, alias « ${esc(c.alias)} »`:""},<br>
-    né(e) le ${fmtD(c.dn)} à ${esc(c.ln)||"—"}, de nationalité ${esc(c.nat)},<br>
-    anciennement membre du groupe <b>${esc(c.groupe)}</b>,</p>
-    <p>a volontairement remis aux autorités du Programme, le <b>${fmtD(d.date)}</b> à <b>${esc(d.lieu)}</b>, l'armement et le matériel ci-après :</p>
-    <table class="dt"><tr><th>Type</th><th>Marque</th><th>Calibre</th><th>N° série</th><th>État</th></tr>${
-      d.armes.map(a=>`<tr><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.calibre)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td></tr>`).join("")}</table>
-    ${(d.munitions||[]).length?`<p style="margin-top:6px"><b>Munitions et explosifs :</b></p>
-    <table class="dt"><tr><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Observations</th></tr>${
-      d.munitions.map(m=>`<tr><td>${esc(m.nature)||"—"}</td><td>${fmtN(m.qte)}</td><td>${esc(m.unite)}</td><td>${esc(m.obs)||"—"}</td></tr>`).join("")}</table>`:""}
-    <p>En foi de quoi, la présente attestation lui est délivrée pour servir et valoir ce que de droit, dans le cadre du dossier n° <b>${c.num}</b>.</p>
-    <div class="sig">
-      <div class="c">L'intéressé(e)<div class="ligne">${esc(c.nom)} ${esc(c.prenom)}</div></div>
-      <div class="c">Fait à ${esc(d.lieu)}, le ${new Date().toLocaleDateString("fr-FR")}<br>Pour le PNDDRR<div class="ligne">${esc(d.agent)}</div></div>
-    </div>`);
-}
-function printAttestation(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  doPrint(attestationHtml(c));
-  log("Impression",`Attestation de désarmement ${c.num}`);
-}
-function authCode(c, legacy){
-  const sel = legacy||!DB.secret ? "UEPNDDR-RCA" : DB.secret;
-  const base=[c.num,c.demobilisation.carte,c.nom,c.prenom,c.dn||"",c.demobilisation.date,sel].join("|");
-  let h1=5381, h2=0;
-  for(let i=0;i<base.length;i++){ const ch=base.charCodeAt(i); h1=((h1<<5)+h1+ch)>>>0; h2=(ch+(h2<<6)+(h2<<16)-h2)>>>0; }
-  const hex=(h1.toString(16)+h2.toString(16)+((h1^h2)>>>0).toString(16)).toUpperCase().padEnd(12,"0").slice(0,12);
-  return hex.slice(0,4)+"-"+hex.slice(4,8)+"-"+hex.slice(8,12);
-}
-/* Générateur de QR code embarqué (qrcode-generator, licence MIT, minifié) */
-var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],f={},c=function(t,r){o=function(t){for(var r=new Array(t),e=0;e<t;e+=1){r[e]=new Array(t);for(var n=0;n<t;n+=1)r[e][n]=null}return r}(i=4*e+17),l(0,0),l(i-7,0),l(0,i-7),s(),h(),d(t,r),e>=7&&v(t),null==a&&(a=p(e,n,u)),w(a,r)},l=function(t,r){for(var e=-1;e<=7;e+=1)if(!(t+e<=-1||i<=t+e))for(var n=-1;n<=7;n+=1)r+n<=-1||i<=r+n||(o[t+e][r+n]=0<=e&&e<=6&&(0==n||6==n)||0<=n&&n<=6&&(0==e||6==e)||2<=e&&e<=4&&2<=n&&n<=4)},h=function(){for(var t=8;t<i-8;t+=1)null==o[t][6]&&(o[t][6]=t%2==0);for(var r=8;r<i-8;r+=1)null==o[6][r]&&(o[6][r]=r%2==0)},s=function(){for(var t=B.getPatternPosition(e),r=0;r<t.length;r+=1)for(var n=0;n<t.length;n+=1){var i=t[r],a=t[n];if(null==o[i][a])for(var u=-2;u<=2;u+=1)for(var f=-2;f<=2;f+=1)o[i+u][a+f]=-2==u||2==u||-2==f||2==f||0==u&&0==f}},v=function(t){for(var r=B.getBCHTypeNumber(e),n=0;n<18;n+=1){var a=!t&&1==(r>>n&1);o[Math.floor(n/3)][n%3+i-8-3]=a}for(n=0;n<18;n+=1){a=!t&&1==(r>>n&1);o[n%3+i-8-3][Math.floor(n/3)]=a}},d=function(t,r){for(var e=n<<3|r,a=B.getBCHTypeInfo(e),u=0;u<15;u+=1){var f=!t&&1==(a>>u&1);u<6?o[u][8]=f:u<8?o[u+1][8]=f:o[i-15+u][8]=f}for(u=0;u<15;u+=1){f=!t&&1==(a>>u&1);u<8?o[8][i-u-1]=f:u<9?o[8][15-u-1+1]=f:o[8][15-u-1]=f}o[i-8][8]=!t},w=function(t,r){for(var e=-1,n=i-1,a=7,u=0,f=B.getMaskFunction(r),c=i-1;c>0;c-=2)for(6==c&&(c-=1);;){for(var g=0;g<2;g+=1)if(null==o[n][c-g]){var l=!1;u<t.length&&(l=1==(t[u]>>>a&1)),f(n,c-g)&&(l=!l),o[n][c-g]=l,-1==(a-=1)&&(u+=1,a=7)}if((n+=e)<0||i<=n){n-=e,e=-e;break}}},p=function(t,r,e){for(var n=A.getRSBlocks(t,r),o=b(),i=0;i<e.length;i+=1){var a=e[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var u=0;for(i=0;i<n.length;i+=1)u+=n[i].dataCount;if(o.getLengthInBits()>8*u)throw"code length overflow. ("+o.getLengthInBits()+">"+8*u+")";for(o.getLengthInBits()+4<=8*u&&o.put(0,4);o.getLengthInBits()%8!=0;)o.putBit(!1);for(;!(o.getLengthInBits()>=8*u||(o.put(236,8),o.getLengthInBits()>=8*u));)o.put(17,8);return function(t,r){for(var e=0,n=0,o=0,i=new Array(r.length),a=new Array(r.length),u=0;u<r.length;u+=1){var f=r[u].dataCount,c=r[u].totalCount-f;n=Math.max(n,f),o=Math.max(o,c),i[u]=new Array(f);for(var g=0;g<i[u].length;g+=1)i[u][g]=255&t.getBuffer()[g+e];e+=f;var l=B.getErrorCorrectPolynomial(c),h=k(i[u],l.getLength()-1).mod(l);for(a[u]=new Array(l.getLength()-1),g=0;g<a[u].length;g+=1){var s=g+h.getLength()-a[u].length;a[u][g]=s>=0?h.getAt(s):0}}var v=0;for(g=0;g<r.length;g+=1)v+=r[g].totalCount;var d=new Array(v),w=0;for(g=0;g<n;g+=1)for(u=0;u<r.length;u+=1)g<i[u].length&&(d[w]=i[u][g],w+=1);for(g=0;g<o;g+=1)for(u=0;u<r.length;u+=1)g<a[u].length&&(d[w]=a[u][g],w+=1);return d}(o,n)};f.addData=function(t,r){var e=null;switch(r=r||"Byte"){case"Numeric":e=M(t);break;case"Alphanumeric":e=x(t);break;case"Byte":e=m(t);break;case"Kanji":e=L(t);break;default:throw"mode:"+r}u.push(e),a=null},f.isDark=function(t,r){if(t<0||i<=t||r<0||i<=r)throw t+","+r;return o[t][r]},f.getModuleCount=function(){return i},f.make=function(){if(e<1){for(var t=1;t<40;t++){for(var r=A.getRSBlocks(t,n),o=b(),i=0;i<u.length;i++){var a=u[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var g=0;for(i=0;i<r.length;i++)g+=r[i].dataCount;if(o.getLengthInBits()<=8*g)break}e=t}c(!1,function(){for(var t=0,r=0,e=0;e<8;e+=1){c(!0,e);var n=B.getLostPoint(f);(0==e||t>n)&&(t=n,r=e)}return r}())},f.createTableTag=function(t,r){t=t||2;var e="";e+='<table style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: "+(r=void 0===r?4*t:r)+"px;",e+='">',e+="<tbody>";for(var n=0;n<f.getModuleCount();n+=1){e+="<tr>";for(var o=0;o<f.getModuleCount();o+=1)e+='<td style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: 0px;",e+=" width: "+t+"px;",e+=" height: "+t+"px;",e+=" background-color: ",e+=f.isDark(n,o)?"#000000":"#ffffff",e+=";",e+='"/>';e+="</tr>"}return e+="</tbody>",e+="</table>"},f.createSvgTag=function(t,r,e,n){var o={};"object"==typeof arguments[0]&&(t=(o=arguments[0]).cellSize,r=o.margin,e=o.alt,n=o.title),t=t||2,r=void 0===r?4*t:r,(e="string"==typeof e?{text:e}:e||{}).text=e.text||null,e.id=e.text?e.id||"qrcode-description":null,(n="string"==typeof n?{text:n}:n||{}).text=n.text||null,n.id=n.text?n.id||"qrcode-title":null;var i,a,u,c,g=f.getModuleCount()*t+2*r,l="";for(c="l"+t+",0 0,"+t+" -"+t+",0 0,-"+t+"z ",l+='<svg version="1.1" xmlns="http://www.w3.org/2000/svg"',l+=o.scalable?"":' width="'+g+'px" height="'+g+'px"',l+=' viewBox="0 0 '+g+" "+g+'" ',l+=' preserveAspectRatio="xMinYMin meet"',l+=n.text||e.text?' role="img" aria-labelledby="'+y([n.id,e.id].join(" ").trim())+'"':"",l+=">",l+=n.text?'<title id="'+y(n.id)+'">'+y(n.text)+"</title>":"",l+=e.text?'<description id="'+y(e.id)+'">'+y(e.text)+"</description>":"",l+='<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>',l+='<path d="',a=0;a<f.getModuleCount();a+=1)for(u=a*t+r,i=0;i<f.getModuleCount();i+=1)f.isDark(a,i)&&(l+="M"+(i*t+r)+","+u+c);return l+='" stroke="transparent" fill="black"/>',l+="</svg>"},f.createDataURL=function(t,r){t=t||2,r=void 0===r?4*t:r;var e=f.getModuleCount()*t+2*r,n=r,o=e-r;return I(e,e,function(r,e){if(n<=r&&r<o&&n<=e&&e<o){var i=Math.floor((r-n)/t),a=Math.floor((e-n)/t);return f.isDark(a,i)?0:1}return 1})},f.createImgTag=function(t,r,e){t=t||2,r=void 0===r?4*t:r;var n=f.getModuleCount()*t+2*r,o="";return o+="<img",o+=' src="',o+=f.createDataURL(t,r),o+='"',o+=' width="',o+=n,o+='"',o+=' height="',o+=n,o+='"',e&&(o+=' alt="',o+=y(e),o+='"'),o+="/>"};var y=function(t){for(var r="",e=0;e<t.length;e+=1){var n=t.charAt(e);switch(n){case"<":r+="&lt;";break;case">":r+="&gt;";break;case"&":r+="&amp;";break;case'"':r+="&quot;";break;default:r+=n}}return r};return f.createASCII=function(t,r){if((t=t||1)<2)return function(t){t=void 0===t?2:t;var r,e,n,o,i,a=1*f.getModuleCount()+2*t,u=t,c=a-t,g={"██":"█","█ ":"▀"," █":"▄","  ":" "},l={"██":"▀","█ ":"▀"," █":" ","  ":" "},h="";for(r=0;r<a;r+=2){for(n=Math.floor((r-u)/1),o=Math.floor((r+1-u)/1),e=0;e<a;e+=1)i="█",u<=e&&e<c&&u<=r&&r<c&&f.isDark(n,Math.floor((e-u)/1))&&(i=" "),u<=e&&e<c&&u<=r+1&&r+1<c&&f.isDark(o,Math.floor((e-u)/1))?i+=" ":i+="█",h+=t<1&&r+1>=c?l[i]:g[i];h+="\n"}return a%2&&t>0?h.substring(0,h.length-a-1)+Array(a+1).join("▀"):h.substring(0,h.length-1)}(r);t-=1,r=void 0===r?2*t:r;var e,n,o,i,a=f.getModuleCount()*t+2*r,u=r,c=a-r,g=Array(t+1).join("██"),l=Array(t+1).join("  "),h="",s="";for(e=0;e<a;e+=1){for(o=Math.floor((e-u)/t),s="",n=0;n<a;n+=1)i=1,u<=n&&n<c&&u<=e&&e<c&&f.isDark(o,Math.floor((n-u)/t))&&(i=0),s+=i?g:l;for(o=0;o<t;o+=1)h+=s+"\n"}return h.substring(0,h.length-1)},f.renderTo2dContext=function(t,r){r=r||2;for(var e=f.getModuleCount(),n=0;n<e;n++)for(var o=0;o<e;o++)t.fillStyle=f.isDark(n,o)?"black":"white",t.fillRect(o*r,n*r,r,r)},f};t.stringToBytes=(t.stringToBytesFuncs={default:function(t){for(var r=[],e=0;e<t.length;e+=1){var n=t.charCodeAt(e);r.push(255&n)}return r}}).default,t.createStringToBytes=function(t,r){var e=function(){for(var e=S(t),n=function(){var t=e.read();if(-1==t)throw"eof";return t},o=0,i={};;){var a=e.read();if(-1==a)break;var u=n(),f=n()<<8|n();i[String.fromCharCode(a<<8|u)]=f,o+=1}if(o!=r)throw o+" != "+r;return i}(),n="?".charCodeAt(0);return function(t){for(var r=[],o=0;o<t.length;o+=1){var i=t.charCodeAt(o);if(i<128)r.push(i);else{var a=e[t.charAt(o)];"number"==typeof a?(255&a)==a?r.push(a):(r.push(a>>>8),r.push(255&a)):r.push(n)}}return r}};var r,e,n,o,i,a=1,u=2,f=4,c=8,g={L:1,M:0,Q:3,H:2},l=0,h=1,s=2,v=3,d=4,w=5,p=6,y=7,B=(r=[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],e=1335,n=7973,i=function(t){for(var r=0;0!=t;)r+=1,t>>>=1;return r},(o={}).getBCHTypeInfo=function(t){for(var r=t<<10;i(r)-i(e)>=0;)r^=e<<i(r)-i(e);return 21522^(t<<10|r)},o.getBCHTypeNumber=function(t){for(var r=t<<12;i(r)-i(n)>=0;)r^=n<<i(r)-i(n);return t<<12|r},o.getPatternPosition=function(t){return r[t-1]},o.getMaskFunction=function(t){switch(t){case l:return function(t,r){return(t+r)%2==0};case h:return function(t,r){return t%2==0};case s:return function(t,r){return r%3==0};case v:return function(t,r){return(t+r)%3==0};case d:return function(t,r){return(Math.floor(t/2)+Math.floor(r/3))%2==0};case w:return function(t,r){return t*r%2+t*r%3==0};case p:return function(t,r){return(t*r%2+t*r%3)%2==0};case y:return function(t,r){return(t*r%3+(t+r)%2)%2==0};default:throw"bad maskPattern:"+t}},o.getErrorCorrectPolynomial=function(t){for(var r=k([1],0),e=0;e<t;e+=1)r=r.multiply(k([1,C.gexp(e)],0));return r},o.getLengthInBits=function(t,r){if(1<=r&&r<10)switch(t){case a:return 10;case u:return 9;case f:case c:return 8;default:throw"mode:"+t}else if(r<27)switch(t){case a:return 12;case u:return 11;case f:return 16;case c:return 10;default:throw"mode:"+t}else{if(!(r<41))throw"type:"+r;switch(t){case a:return 14;case u:return 13;case f:return 16;case c:return 12;default:throw"mode:"+t}}},o.getLostPoint=function(t){for(var r=t.getModuleCount(),e=0,n=0;n<r;n+=1)for(var o=0;o<r;o+=1){for(var i=0,a=t.isDark(n,o),u=-1;u<=1;u+=1)if(!(n+u<0||r<=n+u))for(var f=-1;f<=1;f+=1)o+f<0||r<=o+f||0==u&&0==f||a==t.isDark(n+u,o+f)&&(i+=1);i>5&&(e+=3+i-5)}for(n=0;n<r-1;n+=1)for(o=0;o<r-1;o+=1){var c=0;t.isDark(n,o)&&(c+=1),t.isDark(n+1,o)&&(c+=1),t.isDark(n,o+1)&&(c+=1),t.isDark(n+1,o+1)&&(c+=1),0!=c&&4!=c||(e+=3)}for(n=0;n<r;n+=1)for(o=0;o<r-6;o+=1)t.isDark(n,o)&&!t.isDark(n,o+1)&&t.isDark(n,o+2)&&t.isDark(n,o+3)&&t.isDark(n,o+4)&&!t.isDark(n,o+5)&&t.isDark(n,o+6)&&(e+=40);for(o=0;o<r;o+=1)for(n=0;n<r-6;n+=1)t.isDark(n,o)&&!t.isDark(n+1,o)&&t.isDark(n+2,o)&&t.isDark(n+3,o)&&t.isDark(n+4,o)&&!t.isDark(n+5,o)&&t.isDark(n+6,o)&&(e+=40);var g=0;for(o=0;o<r;o+=1)for(n=0;n<r;n+=1)t.isDark(n,o)&&(g+=1);return e+=Math.abs(100*g/r/r-50)/5*10},o),C=function(){for(var t=new Array(256),r=new Array(256),e=0;e<8;e+=1)t[e]=1<<e;for(e=8;e<256;e+=1)t[e]=t[e-4]^t[e-5]^t[e-6]^t[e-8];for(e=0;e<255;e+=1)r[t[e]]=e;var n={glog:function(t){if(t<1)throw"glog("+t+")";return r[t]},gexp:function(r){for(;r<0;)r+=255;for(;r>=256;)r-=255;return t[r]}};return n}();function k(t,r){if(void 0===t.length)throw t.length+"/"+r;var e=function(){for(var e=0;e<t.length&&0==t[e];)e+=1;for(var n=new Array(t.length-e+r),o=0;o<t.length-e;o+=1)n[o]=t[o+e];return n}(),n={getAt:function(t){return e[t]},getLength:function(){return e.length},multiply:function(t){for(var r=new Array(n.getLength()+t.getLength()-1),e=0;e<n.getLength();e+=1)for(var o=0;o<t.getLength();o+=1)r[e+o]^=C.gexp(C.glog(n.getAt(e))+C.glog(t.getAt(o)));return k(r,0)},mod:function(t){if(n.getLength()-t.getLength()<0)return n;for(var r=C.glog(n.getAt(0))-C.glog(t.getAt(0)),e=new Array(n.getLength()),o=0;o<n.getLength();o+=1)e[o]=n.getAt(o);for(o=0;o<t.getLength();o+=1)e[o]^=C.gexp(C.glog(t.getAt(o))+r);return k(e,0).mod(t)}};return n}var A=function(){var t=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12,7,37,13],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],r=function(t,r){var e={};return e.totalCount=t,e.dataCount=r,e},e={};return e.getRSBlocks=function(e,n){var o=function(r,e){switch(e){case g.L:return t[4*(r-1)+0];case g.M:return t[4*(r-1)+1];case g.Q:return t[4*(r-1)+2];case g.H:return t[4*(r-1)+3];default:return}}(e,n);if(void 0===o)throw"bad rs block @ typeNumber:"+e+"/errorCorrectionLevel:"+n;for(var i=o.length/3,a=[],u=0;u<i;u+=1)for(var f=o[3*u+0],c=o[3*u+1],l=o[3*u+2],h=0;h<f;h+=1)a.push(r(c,l));return a},e}(),b=function(){var t=[],r=0,e={getBuffer:function(){return t},getAt:function(r){var e=Math.floor(r/8);return 1==(t[e]>>>7-r%8&1)},put:function(t,r){for(var n=0;n<r;n+=1)e.putBit(1==(t>>>r-n-1&1))},getLengthInBits:function(){return r},putBit:function(e){var n=Math.floor(r/8);t.length<=n&&t.push(0),e&&(t[n]|=128>>>r%8),r+=1}};return e},M=function(t){var r=a,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+2<r.length;)t.put(o(r.substring(n,n+3)),10),n+=3;n<r.length&&(r.length-n==1?t.put(o(r.substring(n,n+1)),4):r.length-n==2&&t.put(o(r.substring(n,n+2)),7))}},o=function(t){for(var r=0,e=0;e<t.length;e+=1)r=10*r+i(t.charAt(e));return r},i=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);throw"illegal char :"+t};return n},x=function(t){var r=u,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+1<r.length;)t.put(45*o(r.charAt(n))+o(r.charAt(n+1)),11),n+=2;n<r.length&&t.put(o(r.charAt(n)),6)}},o=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);if("A"<=t&&t<="Z")return t.charCodeAt(0)-"A".charCodeAt(0)+10;switch(t){case" ":return 36;case"$":return 37;case"%":return 38;case"*":return 39;case"+":return 40;case"-":return 41;case".":return 42;case"/":return 43;case":":return 44;default:throw"illegal char :"+t}};return n},m=function(r){var e=f,n=t.stringToBytes(r),o={getMode:function(){return e},getLength:function(t){return n.length},write:function(t){for(var r=0;r<n.length;r+=1)t.put(n[r],8)}};return o},L=function(r){var e=c,n=t.stringToBytesFuncs.SJIS;if(!n)throw"sjis not supported.";!function(){var t=n("友");if(2!=t.length||38726!=(t[0]<<8|t[1]))throw"sjis not supported."}();var o=n(r),i={getMode:function(){return e},getLength:function(t){return~~(o.length/2)},write:function(t){for(var r=o,e=0;e+1<r.length;){var n=(255&r[e])<<8|255&r[e+1];if(33088<=n&&n<=40956)n-=33088;else{if(!(57408<=n&&n<=60351))throw"illegal char at "+(e+1)+"/"+n;n-=49472}n=192*(n>>>8&255)+(255&n),t.put(n,13),e+=2}if(e<r.length)throw"illegal char at "+(e+1)}};return i},D=function(){var t=[],r={writeByte:function(r){t.push(255&r)},writeShort:function(t){r.writeByte(t),r.writeByte(t>>>8)},writeBytes:function(t,e,n){e=e||0,n=n||t.length;for(var o=0;o<n;o+=1)r.writeByte(t[o+e])},writeString:function(t){for(var e=0;e<t.length;e+=1)r.writeByte(t.charCodeAt(e))},toByteArray:function(){return t},toString:function(){var r="";r+="[";for(var e=0;e<t.length;e+=1)e>0&&(r+=","),r+=t[e];return r+="]"}};return r},S=function(t){var r=t,e=0,n=0,o=0,i={read:function(){for(;o<8;){if(e>=r.length){if(0==o)return-1;throw"unexpected end of file./"+o}var t=r.charAt(e);if(e+=1,"="==t)return o=0,-1;t.match(/^\s$/)||(n=n<<6|a(t.charCodeAt(0)),o+=6)}var i=n>>>o-8&255;return o-=8,i}},a=function(t){if(65<=t&&t<=90)return t-65;if(97<=t&&t<=122)return t-97+26;if(48<=t&&t<=57)return t-48+52;if(43==t)return 62;if(47==t)return 63;throw"c:"+t};return i},I=function(t,r,e){for(var n=function(t,r){var e=t,n=r,o=new Array(t*r),i={setPixel:function(t,r,n){o[r*e+t]=n},write:function(t){t.writeString("GIF87a"),t.writeShort(e),t.writeShort(n),t.writeByte(128),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(255),t.writeByte(255),t.writeByte(255),t.writeString(","),t.writeShort(0),t.writeShort(0),t.writeShort(e),t.writeShort(n),t.writeByte(0);var r=a(2);t.writeByte(2);for(var o=0;r.length-o>255;)t.writeByte(255),t.writeBytes(r,o,255),o+=255;t.writeByte(r.length-o),t.writeBytes(r,o,r.length-o),t.writeByte(0),t.writeString(";")}},a=function(t){for(var r=1<<t,e=1+(1<<t),n=t+1,i=u(),a=0;a<r;a+=1)i.add(String.fromCharCode(a));i.add(String.fromCharCode(r)),i.add(String.fromCharCode(e));var f,c,g,l=D(),h=(f=l,c=0,g=0,{write:function(t,r){if(t>>>r!=0)throw"length over";for(;c+r>=8;)f.writeByte(255&(t<<c|g)),r-=8-c,t>>>=8-c,g=0,c=0;g|=t<<c,c+=r},flush:function(){c>0&&f.writeByte(g)}});h.write(r,n);var s=0,v=String.fromCharCode(o[s]);for(s+=1;s<o.length;){var d=String.fromCharCode(o[s]);s+=1,i.contains(v+d)?v+=d:(h.write(i.indexOf(v),n),i.size()<4095&&(i.size()==1<<n&&(n+=1),i.add(v+d)),v=d)}return h.write(i.indexOf(v),n),h.write(e,n),h.flush(),l.toByteArray()},u=function(){var t={},r=0,e={add:function(n){if(e.contains(n))throw"dup key:"+n;t[n]=r,r+=1},size:function(){return r},indexOf:function(r){return t[r]},contains:function(r){return void 0!==t[r]}};return e};return i}(t,r),o=0;o<r;o+=1)for(var i=0;i<t;i+=1)n.setPixel(i,o,e(i,o));var a=D();n.write(a);for(var u=function(){var t=0,r=0,e=0,n="",o={},i=function(t){n+=String.fromCharCode(a(63&t))},a=function(t){if(t<0);else{if(t<26)return 65+t;if(t<52)return t-26+97;if(t<62)return t-52+48;if(62==t)return 43;if(63==t)return 47}throw"n:"+t};return o.writeByte=function(n){for(t=t<<8|255&n,r+=8,e+=1;r>=6;)i(t>>>r-6),r-=6},o.flush=function(){if(r>0&&(i(t<<6-r),t=0,r=0),e%3!=0)for(var o=3-e%3,a=0;a<o;a+=1)n+="="},o.toString=function(){return n},o}(),f=a.toByteArray(),c=0;c<f.length;c+=1)u.writeByte(f[c]);return u.flush(),"data:image/gif;base64,"+u};return t}();qrcode.stringToBytesFuncs["UTF-8"]=function(t){return function(t){for(var r=[],e=0;e<t.length;e++){var n=t.charCodeAt(e);n<128?r.push(n):n<2048?r.push(192|n>>6,128|63&n):n<55296||n>=57344?r.push(224|n>>12,128|n>>6&63,128|63&n):(e++,n=65536+((1023&n)<<10|1023&t.charCodeAt(e)),r.push(240|n>>18,128|n>>12&63,128|n>>6&63,128|63&n))}return r}(t)},function(t){"function"==typeof define&&define.amd?define([],t):"object"==typeof exports&&(module.exports=t())}(function(){return qrcode});
-function qrSvg(txt, taille){
-  try{
-    const qr=qrcode(0,"M"); qr.addData(String(txt)); qr.make();
-    const n=qr.getModuleCount(), t=taille||96;
-    let r="";
-    for(let y=0;y<n;y++) for(let x=0;x<n;x++) if(qr.isDark(y,x)) r+='<rect x="'+x+'" y="'+y+'" width="1" height="1"/>';
-    return '<svg class="cqr" viewBox="0 0 '+n+' '+n+'" width="'+t+'" height="'+t+'" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"><rect width="'+n+'" height="'+n+'" fill="#fff"/><g fill="#000">'+r+"</g></svg>";
-  }catch(e){ return ""; }
-}
-const C39={"0":"nnnwwnwnn","1":"wnnwnnnnw","2":"nnwwnnnnw","3":"wnwwnnnnn","4":"nnnwwnnnw","5":"wnnwwnnnn","6":"nnwwwnnnn","7":"nnnwnnwnw","8":"wnnwnnwnn","9":"nnwwnnwnn","A":"wnnnnwnnw","B":"nnwnnwnnw","C":"wnwnnwnnn","D":"nnnnwwnnw","E":"wnnnwwnnn","F":"nnwnwwnnn","G":"nnnnnwwnw","H":"wnnnnwwnn","I":"nnwnnwwnn","J":"nnnnwwwnn","K":"wnnnnnnww","L":"nnwnnnnww","M":"wnwnnnnwn","N":"nnnnwnnww","O":"wnnnwnnwn","P":"nnwnwnnwn","Q":"nnnnnnwww","R":"wnnnnnwwn","S":"nnwnnnwwn","T":"nnnnwnwwn","U":"wwnnnnnnw","V":"nwwnnnnnw","W":"wwwnnnnnn","X":"nwnnwnnnw","Y":"wwnnwnnnn","Z":"nwwnwnnnn","-":"nwnnnnwnw",".":"wwnnnnwnn"," ":"nwwnnnwnn","*":"nwnnwnwnn"};
-function barcode39(txt, h){
-  h=h||44;
-  const chars=("*"+String(txt).toUpperCase().replace(/[^0-9A-Z\-\. ]/g,"")+"*").split("");
-  let x=0, bars=[];
-  for(const ch of chars){
-    const pat=C39[ch]; if(!pat) continue;
-    for(let i=0;i<9;i++){ const wdt=pat[i]==="w"?3:1; if(i%2===0) bars.push([x,wdt]); x+=wdt; }
-    x+=1; /* espace inter-caractère */
-  }
-  const W=x-1;
-  return `<svg class="cbar" viewBox="0 0 ${W} ${h}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">${
-    bars.map(([bx,bw])=>`<rect x="${bx}" y="0" width="${bw}" height="${h}" fill="#000"/>`).join("")}</svg>`;
-}
-function carteHtml(c){
-  const dm=c.demobilisation;
-  const qr=cfg("carteQR")!==false?qrSvg("PNDDRR|"+dm.carte+"|"+authCode(c),48):"";
-  const cb=cfg("carteCodeBarres")!==false?`${barcode39(dm.carte,22)}<div class="cbar-lbl">${esc(dm.carte)}</div>`:"";
-  return `
-    <div class="carte-pvc recto">
-      <div class="ch chc"><div class="emb">${ARM_SVG}</div>
-        <div class="tx">
-          <b>RÉPUBLIQUE CENTRAFRICAINE</b>
-          <small>UEPNDDR</small>
-          <div class="ct">CARTE DE DÉMOBILISÉ</div>
-          <small>N° ${esc(dm.carte)}</small>
-        </div>
-      </div>
-      <div class="cb">
-        <div class="ph">${c.photo?`<img src="${c.photo}">`:"PHOTO"}</div>
-        <table>
-          <tr><td>Nom</td><td>${esc(c.nom)}</td></tr>
-          <tr><td>Prénom(s)</td><td>${esc(c.prenom)}</td></tr>
-          <tr><td>Né(e) le</td><td>${fmtD(c.dn)}</td></tr>
-          <tr><td>Sexe</td><td>${c.sexe==="M"?"M":"F"}</td></tr>
-          <tr><td>Dossier</td><td>${esc(c.num)}</td></tr>
-          <tr><td>Démobilisé</td><td>${fmtD(dm.date)}</td></tr>
-        </table>
-      </div>
-      <div class="cauth">AUTH. <b>${authCode(c)}</b></div>
-      <div class="cf"><span>${esc(dm.lieu)}</span><span>${esc(cfg("signataireCarte")||"Le Coordonnateur")}</span></div>
-    </div>
-    <div class="carte-pvc verso">
-      <div class="ch"><b>DISPOSITIONS</b></div>
-      <div class="cb verso-body">
-        <p>Carte personnelle attestant la démobilisation officielle au titre du PNDDRR. En cas de perte, prévenir l'antenne la plus proche.</p>
-        ${qr||cb?`<div class="cbar-box">${qr?`<div class="cqr-wrap">${qr}</div>`:""}${cb?`<div class="cbar-wrap">${cb}</div>`:""}</div>`:""}
-      </div>
-      <div class="cf"><span>N° ${esc(dm.carte)}</span><span>République Centrafricaine</span></div>
-    </div>`;
-}
-function printCarte(id){
-  const c=DB.combattants.find(x=>x.id===id);
-  doPrint(carteHtml(c), "pvc");
-  log("Impression",`Carte de démobilisé ${c.demobilisation.carte}`);
-}
-var DOC_Q="";
-function docSearch(v){ DOC_Q=v; rDocs(); const el=$("doc_q"); if(el){ el.focus(); const n=el.value.length; try{el.setSelectionRange(n,n);}catch(e){} } }
-function docMatch(c){
-  const q=DOC_Q.trim().toLowerCase(); if(!q) return true;
-  return [c.num,c.nom,c.prenom,c.alias,c.vague,c.prefecture,c.groupe,c.demobilisation?c.demobilisation.carte:""].join(" ").toLowerCase().includes(q);
-}
-function rDocs(){
-  const cartes=DB.combattants.filter(c=>c.demobilisation&&docMatch(c)).sort((a,b)=>a.demobilisation.carte.localeCompare(b.demobilisation.carte));
-  const attests=DB.combattants.filter(c=>c.desarmement&&docMatch(c)).sort((a,b)=>a.num.localeCompare(b.num));
-  $("view").innerHTML = `
-  <div class="toolbar">
-    <div class="field" style="flex:1;max-width:520px"><label>Recherche</label><input id="doc_q" value="${esc(DOC_Q)}" oninput="docSearch(this.value)" placeholder="Nom, n° dossier, n° de carte, vague, préfecture…"></div>
-    ${DOC_Q?`<button class="btn ghost" style="align-self:end" onclick="DOC_Q='';rDocs()">✕ Effacer</button>`:""}
-  </div>
-  <div class="cards">
-    <div class="kpi c-dem"><div class="n">${cartes.length}</div><div class="l">Cartes de démobilisé délivrées</div></div>
-    <div class="kpi c-des"><div class="n">${attests.length}</div><div class="l">Attestations de désarmement</div></div>
-  </div>
-  <div class="panel"><div class="ph"><h3>Vérifier l'authenticité d'une carte</h3></div><div class="pb">
-    <div class="toolbar" style="margin-bottom:0">
-      <div class="field" style="max-width:230px"><label>N° de carte</label><input id="ver_num" placeholder="DEM-2026-0001"></div>
-      <div class="field" style="max-width:230px"><label>Code d'authentification</label><input id="ver_code" placeholder="XXXX-XXXX-XXXX"></div>
-      <button class="btn" style="align-self:end" onclick="verifCarte()">Vérifier</button>
-    </div>
-    <div id="verRes" style="margin-top:12px"></div>
-    <p class="small muted" style="margin-top:10px">Le code figure au recto de chaque carte. La vérification fonctionne hors ligne, sur tout poste disposant de l'application, et est consignée au journal.</p>
-  </div></div>
-  <div class="panel"><div class="ph"><h3>Partie 1 — Cartes de démobilisé (${cartes.length})</h3>
-    <span style="display:flex;gap:7px">
-      <button class="btn sm sec" onclick="exportCartesCSV()">Exporter CSV</button>
-      <button class="btn sm sec" ${cartes.length?"":"disabled"} onclick="printToutesCartes()">Imprimer toutes les cartes</button>
-    </span></div>
-    <p class="small muted" style="margin:0;padding:10px 16px 0">Impression : <b>8,5 × 5,5 cm</b> (carte PVC, une face par page). Dans la boîte d'impression, choisir le format 85 × 55 mm et les marges à zéro.</p>
-    <div class="pb nopad">${
-    cartes.length?`<table><thead><tr><th>N° de carte</th><th>Titulaire</th><th>Dossier</th><th>Démobilisé le</th><th>Lieu</th><th>Vague</th><th>Actions</th></tr></thead><tbody>${
-      cartes.map(c=>`<tr><td><b>${esc(c.demobilisation.carte)}</b></td>
-      <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
-      <td>${c.num}</td><td>${fmtD(c.demobilisation.date)}</td><td class="small">${esc(c.demobilisation.lieu)}</td>
-      <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
-      <td class="actions-cell"><button class="btn sm sec" onclick="printCarte('${c.id}')">Voir / imprimer la carte</button></td></tr>`).join("")
-    }</tbody></table>`:`<div class="empty">Aucune carte de démobilisé${DOC_Q?" ne correspond à la recherche":" délivrée pour le moment"}.</div>`}</div></div>
-  <div class="panel"><div class="ph"><h3>Partie 2 — Attestations de désarmement (${attests.length})</h3>
-    <span style="display:flex;gap:7px">
-      <button class="btn sm sec" onclick="exportAttestsCSV()">Exporter CSV</button>
-      <button class="btn sm sec" ${attests.length?"":"disabled"} onclick="printToutesAttests()">Imprimer toutes les attestations</button>
-    </span></div><div class="pb nopad">${
-    attests.length?`<table><thead><tr><th>Dossier</th><th>Titulaire</th><th>Désarmé le</th><th>Lieu</th><th>Armes</th><th>Munitions</th><th>Vague</th><th>Actions</th></tr></thead><tbody>${
-      attests.map(c=>`<tr><td><b>${c.num}</b></td>
-      <td><span class="link" onclick="go('fiche','${c.id}')">${esc(c.nom)} ${esc(c.prenom)}</span></td>
-      <td>${fmtD(c.desarmement.date)}</td><td class="small">${esc(c.desarmement.lieu)}</td>
-      <td>${c.desarmement.armes.length}</td><td>${(c.desarmement.munitions||[]).length}</td>
-      <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
-      <td class="actions-cell"><button class="btn sm sec" onclick="printAttestation('${c.id}')">Voir / imprimer l'attestation</button></td></tr>`).join("")
-    }</tbody></table>`:`<div class="empty">Aucune attestation${DOC_Q?" ne correspond à la recherche":" — les attestations sont produites au désarmement"}.</div>`}</div></div>`;
-}
-function savePoste(){
-  DB.poste=$("posteNom").value.trim();
-  DB.posteCode=$("posteCodeInp").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5);
-  persist(); log("Synchronisation",`Poste : ${DB.poste||"(vide)"} — code ${DB.posteCode||"(aucun)"}`);
-  toast("Identification du poste enregistrée."); rSauvegarde();
-}
-function genSecret(){
-  openModal(DB.secret?"Renouveler le secret d'installation":"Générer le secret d'installation", `
-    <p>Le secret est une clé aléatoire propre à votre installation. ${DB.secret?"Le renouveler change les codes des <b>futures</b> cartes ; les cartes déjà imprimées restent vérifiables (repli sur les codes antérieurs au secret).":"Une fois généré, les nouveaux codes d'authentification en dépendent."}</p>
-    <p class="small muted" style="margin-top:8px">Pensez à exporter une sauvegarde JSON vers les autres postes après cette opération, afin qu'ils vérifient les mêmes codes.</p>`,
-    `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="doGenSecret()">Générer</button>`);
-}
-function doGenSecret(){
-  if(CUR.role!=="admin"){ toast("Réservé à l'administrateur."); return; }
-  let al="ABCDEFGHJKLMNPQRSTUVWXYZ23456789", sec="";
-  const rnd=new Uint32Array(24);
-  try{ crypto.getRandomValues(rnd); }catch(e){ for(let i=0;i<24;i++) rnd[i]=Math.floor(Math.random()*4294967296); }
-  for(let i=0;i<24;i++) sec+=al[rnd[i]%al.length];
-  DB.secret=sec; persist();
-  log("Sécurité","Secret d'installation "+(DB.secret?"renouvelé":"généré"));
-  closeModal(); toast("Secret d'installation enregistré."); rSauvegarde();
-}
-function verifCarte(){
-  const num=$("ver_num").value.trim().toUpperCase();
-  const code=$("ver_code").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
-  if(!num||!code){ toast("Saisissez le n° de carte et le code d'authentification."); return; }
-  const c=DB.combattants.find(x=>x.demobilisation&&x.demobilisation.carte.toUpperCase()===num);
-  /* accepte le code du secret courant, ou l'ancien pour les cartes imprimées avant sa définition */
-  const ok = c && (authCode(c).replace(/-/g,"")===code || authCode(c,true).replace(/-/g,"")===code);
-  if(!c){
-    $("verRes").innerHTML=`<div style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:12px"><b style="color:var(--danger)">✘ Carte inconnue.</b> Aucune carte n° <b>${esc(num)}</b> n'existe dans ce registre. Vérifiez le numéro ou synchronisez les données du poste émetteur.</div>`;
-  } else if(!ok){
-    $("verRes").innerHTML=`<div style="background:#FDF1F1;border:1px solid #E3B4B4;border-radius:8px;padding:12px"><b style="color:var(--danger)">✘ Code invalide.</b> Le code saisi ne correspond pas à la carte n° <b>${esc(num)}</b>. La carte présentée est susceptible d'être falsifiée — retenir la carte et en référer à l'UEPNDDR.</div>`;
-  } else {
-    $("verRes").innerHTML=`<div style="background:#EAF7EE;border:1px solid #9ED0AC;border-radius:8px;padding:12px;display:flex;gap:14px;align-items:center">
-      <div style="width:64px;height:76px;border:1px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted);overflow:hidden">${c.photo?`<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover">`:"Photo"}</div>
-      <div><b style="color:var(--ok)">✔ Carte authentique.</b><br>
-      <b>${esc(c.nom)} ${esc(c.prenom)}</b>${c.alias?` — alias « ${esc(c.alias)} »`:""}, ${c.sexe==="M"?"né":"née"} le ${fmtD(c.dn)}<br>
-      <span class="small">Dossier ${c.num} · démobilisé(e) le ${fmtD(c.demobilisation.date)} à ${esc(c.demobilisation.lieu)} · statut actuel : <span class="badge st-${c.statut}">${STATUTS[c.statut].lbl}</span></span><br>
-      <span class="link small" onclick="go('fiche','${c.id}')">Ouvrir le dossier complet</span></div></div>`;
-  }
-  log("Vérification de carte",`${num} — ${!c?"carte inconnue":ok?"authentique ("+c.num+")":"code invalide"}`);
-}
-function exportCartesCSV(){
-  const rows=[["N° de carte","Nom","Prénom","N° dossier","Démobilisé le","Lieu","Vague","Groupe armé","Préfecture"]];
-  DB.combattants.filter(c=>c.demobilisation&&docMatch(c)).forEach(c=>rows.push([c.demobilisation.carte,c.nom,c.prenom,c.num,c.demobilisation.date,c.demobilisation.lieu,c.vague||"",c.groupe,c.prefecture]));
-  dl(`pnddrr_cartes_demobilise_${today()}.csv`, csv(rows), "text/csv"); log("Export CSV","Cartes de démobilisé");
-}
-function exportAttestsCSV(){
-  const rows=[["N° dossier","Nom","Prénom","Désarmé le","Lieu","Armes","Lots de munitions","Vague","Groupe armé","Préfecture"]];
-  DB.combattants.filter(c=>c.desarmement&&docMatch(c)).forEach(c=>rows.push([c.num,c.nom,c.prenom,c.desarmement.date,c.desarmement.lieu,c.desarmement.armes.length,(c.desarmement.munitions||[]).length,c.vague||"",c.groupe,c.prefecture]));
-  dl(`pnddrr_attestations_desarmement_${today()}.csv`, csv(rows), "text/csv"); log("Export CSV","Attestations de désarmement");
-}
-function printToutesCartes(){
-  const L=DB.combattants.filter(c=>c.demobilisation&&docMatch(c));
-  doPrint(L.map(c=>carteHtml(c)).join(""), "pvc");
-  log("Impression",`${L.length} carte(s) de démobilisé (lot)`);
-}
-function printToutesAttests(){
-  const L=DB.combattants.filter(c=>c.desarmement&&docMatch(c));
-  doPrint(L.map(c=>attestationHtml(c)).join('<div style="page-break-after:always"></div>'));
-  log("Impression",`${L.length} attestation(s) de désarmement (lot)`);
-}
-function printRegArmes(){
-  const A=allArmes(), MU=allMunitions();
-  doPrint(docWrap(`${docEntete("Registre des armes et matériels collectés")}
-    <h2 class="titre">Registre des armes collectées</h2>
-    <p class="small">Arrêté au ${new Date().toLocaleDateString("fr-FR")} — ${A.length} arme(s) et lot(s) enregistrés.</p>
-    <table class="dt"><tr><th>N°</th><th>Type</th><th>Marque</th><th>N° série</th><th>État</th><th>Garde</th><th>Remise par</th><th>Dossier</th><th>Date</th></tr>${
-      A.map((a,i)=>`<tr><td>${i+1}</td><td>${esc(a.type)}</td><td>${esc(a.marque)||"—"}</td><td>${esc(a.serie)||"—"}</td><td>${esc(a.etat)}</td><td>${GARDE_LBL[(a.garde&&a.garde.etat)||"depot"]}${a.garde&&a.garde.scelle?" · "+esc(a.garde.scelle):""}${a.garde&&a.garde.destruction&&a.garde.destruction.pv?" · "+esc(a.garde.destruction.pv):""}</td><td>${esc(a.nom)}</td><td>${a.num}</td><td>${fmtD(a.date)}</td></tr>`).join("")}</table>
-    ${MU.length?`<h3 style="font-size:13px;margin-top:14px;text-decoration:underline">Munitions et explosifs collectés (${MU.length} lot(s))</h3>
-    <table class="dt"><tr><th>N°</th><th>Nature / calibre</th><th>Quantité</th><th>Unité</th><th>Remise par</th><th>Dossier</th><th>Date</th></tr>${
-      MU.map((m,i)=>`<tr><td>${i+1}</td><td>${esc(m.nature)||"—"}</td><td>${fmtN(m.qte)}</td><td>${esc(m.unite)}</td><td>${esc(m.nom)}</td><td>${m.num}</td><td>${fmtD(m.date)}</td></tr>`).join("")}</table>`:""}
-    <div class="sig"><div class="c"></div><div class="c">Fait à ${esc(cfg("villeSignature")||"Bangui")}, le ${new Date().toLocaleDateString("fr-FR")}<br>Pour le PNDDRR<div class="ligne">${esc(CUR.nom)}</div></div></div>`));
-  log("Impression","Registre des armes");
 }
 
 

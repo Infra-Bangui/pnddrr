@@ -9,7 +9,6 @@ const NAV = [
   {grp:"Prise en charge"},
   {id:"registre", lbl:"Registre des ex-combattants", roles:["admin","agent","suivi","superviseur"]},
   {id:"armes", lbl:"Registre des armes", roles:["admin","agent","suivi","superviseur"]},
-  {id:"docs", lbl:"Cartes & attestations", roles:["admin","agent","suivi","superviseur"]},
   {id:"reintegration", lbl:"Suivi des réintégrations", roles:["admin","agent","suivi","superviseur"]},
   {id:"jalons", lbl:"Formation & intégration", roles:["admin","agent","suivi","superviseur"]},
   {grp:"Tableau de bord"},
@@ -57,7 +56,9 @@ function viewAllowed(v){
   return it?navAllowed(it):true;
 }
 function go(v, arg){
+  if(v==="docs") v="kits";
   if(!viewAllowed(v)){ toast("Accès non autorisé pour ce compte."); return; }
+  if(v==="nouveau"&&!arg){ ENR_STEP=1; ENR_DRAFT={photo:null,empreinte:null,identity:null}; }
   VIEW=v;
   const OUTIL_IDS=OUTILS.map(o=>o.id);
   document.querySelectorAll("#mainNav a").forEach(a=>a.classList.toggle("on",a.dataset.v===v||(a.dataset.v==="parametres"&&OUTIL_IDS.includes(v))));
@@ -70,7 +71,7 @@ function go(v, arg){
     kits:"Opération — distribution de kits",
     registre:"Prise en charge — registre des ex-combattants",
     armes:"Prise en charge — registre des armes",
-    docs:"Prise en charge — cartes & attestations",
+    docs:"Opération — distribution de kits (cartes & attestations)",
     reintegration:"Prise en charge — suivi des réintégrations",
     jalons:"Prise en charge — formation & intégration",
     import:"Administration — importation de données",
@@ -86,8 +87,8 @@ function go(v, arg){
   };
   $("pageTitle").textContent = titles[v]||"";
   const R={
-    dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rDocs,
-    aptitude:()=>rOperationAttente("aptitude"),medecine:()=>rOperationAttente("medecine"),kits:()=>rOperationAttente("kits"),
+    dashboard:rDash,stats:rStats,nouveau:rNouveau,registre:()=>rRegistre(arg),armes:rArmes,docs:rKits,
+    aptitude:rAptitude,medecine:rMedecine,kits:rKits,
     import:()=>rImport(arg),referentiels:rReferentiels,reintegration:rReint,jalons:rJalons,carto:rCarto,
     recherche:rRecherche,comptes:rComptes,journal:rJournal,sauvegarde:rSauvegarde,config:rConfig,parametres:rParametres,
     fiche:()=>rFiche(arg)
