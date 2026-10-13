@@ -221,18 +221,23 @@ function docSearch(v){
   if(VIEW==="kits") rKits(); else rDocs();
   const el=$("doc_q"); if(el){ el.focus(); const n=el.value.length; try{el.setSelectionRange(n,n);}catch(e){} }
 }
+function docSearchQuery(){
+  return (typeof VIEW!=="undefined"&&VIEW==="kits"&&typeof KIT_Q!=="undefined")?KIT_Q:DOC_Q;
+}
 function docMatch(c){
-  const q=DOC_Q.trim().toLowerCase(); if(!q) return true;
+  const q=docSearchQuery().trim().toLowerCase(); if(!q) return true;
   return [c.num,c.nom,c.prenom,c.alias,c.vague,c.prefecture,c.groupe,c.demobilisation?c.demobilisation.carte:""].join(" ").toLowerCase().includes(q);
 }
 function docsContenuHtml(){
+  const inKits=typeof VIEW!=="undefined"&&VIEW==="kits";
+  const qActive=!!docSearchQuery().trim();
   const cartes=DB.combattants.filter(c=>c.demobilisation&&docMatch(c)).sort((a,b)=>a.demobilisation.carte.localeCompare(b.demobilisation.carte));
   const attests=DB.combattants.filter(c=>c.desarmement&&docMatch(c)).sort((a,b)=>a.num.localeCompare(b.num));
   return `
-  <div class="toolbar">
+  ${inKits?"":`<div class="toolbar">
     <div class="field" style="flex:1;max-width:520px"><label>Recherche</label><input id="doc_q" value="${esc(DOC_Q)}" oninput="docSearch(this.value)" placeholder="Nom, n° dossier, n° de carte, vague, préfecture…"></div>
-    ${DOC_Q?`<button class="btn ghost" style="align-self:end" onclick="DOC_Q='';${VIEW==="kits"?"rKits":"rDocs"}()">✕ Effacer</button>`:""}
-  </div>
+    ${DOC_Q?`<button class="btn ghost" style="align-self:end" onclick="DOC_Q='';rDocs()">✕ Effacer</button>`:""}
+  </div>`}
   <div class="cards">
     <div class="kpi c-dem"><div class="n">${cartes.length}</div><div class="l">Cartes de démobilisé délivrées</div></div>
     <div class="kpi c-des"><div class="n">${attests.length}</div><div class="l">Attestations de désarmement</div></div>
@@ -259,7 +264,7 @@ function docsContenuHtml(){
       <td>${c.num}</td><td>${fmtD(c.demobilisation.date)}</td><td class="small">${esc(c.demobilisation.lieu)}</td>
       <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
       <td class="actions-cell"><button class="btn sm sec" onclick="printCarte('${c.id}')">${c.auditRemise&&c.auditRemise.photo?"Voir / imprimer":"Photo d'audit requise"}</button></td></tr>`).join("")
-    }</tbody></table>`:`<div class="empty">Aucune carte de démobilisé${DOC_Q?" ne correspond à la recherche":" délivrée pour le moment"}.</div>`}</div></div>
+    }</tbody></table>`:`<div class="empty">Aucune carte de démobilisé${qActive?" ne correspond à la recherche":" délivrée pour le moment"}.</div>`}</div></div>
   <div class="panel"><div class="ph"><h3>Partie 2 — Attestations de désarmement (${attests.length})</h3>
     <span style="display:flex;gap:7px">
       <button class="btn sm sec" onclick="exportAttestsCSV()">Exporter CSV</button>
@@ -272,7 +277,7 @@ function docsContenuHtml(){
       <td>${c.desarmement.armes.length}</td><td>${(c.desarmement.munitions||[]).length}</td>
       <td class="small">${c.vague?`<span class="tag">${esc(c.vague)}</span>`:"—"}</td>
       <td class="actions-cell"><button class="btn sm sec" onclick="printAttestation('${c.id}')">Voir / imprimer l'attestation</button></td></tr>`).join("")
-    }</tbody></table>`:`<div class="empty">Aucune attestation${DOC_Q?" ne correspond à la recherche":" — les attestations sont produites au désarmement"}.</div>`}</div></div>`;
+    }</tbody></table>`:`<div class="empty">Aucune attestation${qActive?" ne correspond à la recherche":" — les attestations sont produites au désarmement"}.</div>`}</div></div>`;
 }
 function rDocs(){
   $("view").innerHTML = `<div class="panel"><div class="ph"><h3>Cartes &amp; attestations</h3></div><div class="pb">${docsContenuHtml()}</div></div>`;
