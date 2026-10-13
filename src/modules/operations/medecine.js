@@ -1,6 +1,19 @@
 /* module: operations/medecine.js — PNDDRR engine (classic globals) */
 var MED_Q = "";
 
+function medSearch(v) {
+  MED_Q = v;
+  rMedecine();
+  const el = $("med_q");
+  if (el) {
+    el.focus();
+    const n = el.value.length;
+    try {
+      el.setSelectionRange(n, n);
+    } catch (e) {}
+  }
+}
+
 function medMatch(c) {
   const q = MED_Q.trim().toLowerCase();
   if (!q) return true;
@@ -24,7 +37,7 @@ function rMedecine() {
   <div class="panel"><div class="ph"><h3>Médecine</h3><span class="muted small">Opération</span></div>
   <div class="pb"><p>Le médecin signifie si le combattant est <b>apte</b> ou <b>inapte</b>, physiquement et biologiquement, avant la suite du circuit.</p></div></div>
   <div class="toolbar">
-    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="med_q" value="${esc(MED_Q)}" oninput="MED_Q=this.value;rMedecine()" placeholder="Nom, n° dossier…"></div>
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="med_q" value="${esc(MED_Q)}" oninput="medSearch(this.value)" placeholder="Nom, n° dossier…"></div>
   </div>
   <div class="cards">
     <div class="kpi c-dem"><div class="n">${pending.length}</div><div class="l">En attente d'avis médical</div></div>

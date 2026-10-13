@@ -2,6 +2,19 @@
 /* Distribution de kits + cartes et attestations (audit photo avant impression) */
 var KIT_Q = "";
 
+function kitSearch(v) {
+  KIT_Q = v;
+  rKits();
+  const el = $("kit_q");
+  if (el) {
+    el.focus();
+    const n = el.value.length;
+    try {
+      el.setSelectionRange(n, n);
+    } catch (e) {}
+  }
+}
+
 function kitMatch(c) {
   const q = KIT_Q.trim().toLowerCase();
   if (!q) return true;
@@ -19,7 +32,7 @@ function rKits() {
     <p>Remise des kits et délivrance des cartes. <b>Avant toute impression de carte</b>, enregistrez la photo d'audit : le combattant filmé avec l'argent reçu (preuve de perception).</p>
   </div></div>
   <div class="toolbar">
-    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="kit_q" value="${esc(KIT_Q)}" oninput="KIT_Q=this.value;rKits()" placeholder="Nom, n° dossier, n° carte…"></div>
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="kit_q" value="${esc(KIT_Q)}" oninput="kitSearch(this.value)" placeholder="Nom, n° dossier, n° carte…"></div>
   </div>
   <div class="cards">
     <div class="kpi c-rm"><div class="n">${sansAudit.length}</div><div class="l">Cartes sans photo d'audit</div></div>

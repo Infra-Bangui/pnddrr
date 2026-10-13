@@ -1804,6 +1804,19 @@ function saveAbandon(id){
 /* Aptitude : parcours combattant et première orientation (Militaire / Socio-économique) */
 var APT_Q = "";
 
+function aptSearch(v) {
+  APT_Q = v;
+  rAptitude();
+  const el = $("apt_q");
+  if (el) {
+    el.focus();
+    const n = el.value.length;
+    try {
+      el.setSelectionRange(n, n);
+    } catch (e) {}
+  }
+}
+
 function aptMatch(c) {
   const q = APT_Q.trim().toLowerCase();
   if (!q) return true;
@@ -1828,7 +1841,7 @@ function rAptitude() {
     <p>Première décision d'orientation et saisie du parcours dans le groupe armé : fonction, niveau d'instruction, années de service et zone d'opération.</p>
   </div></div>
   <div class="toolbar">
-    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="apt_q" value="${esc(APT_Q)}" oninput="APT_Q=this.value;rAptitude()" placeholder="Nom, n° dossier, vague…"></div>
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="apt_q" value="${esc(APT_Q)}" oninput="aptSearch(this.value)" placeholder="Nom, n° dossier, vague…"></div>
   </div>
   <div class="cards">
     <div class="kpi c-dem"><div class="n">${pending.length}</div><div class="l">En attente de saisie aptitude</div></div>
@@ -1923,6 +1936,19 @@ function saveAptitude(id) {
 /* module: operations/medecine.js — PNDDRR engine (classic globals) */
 var MED_Q = "";
 
+function medSearch(v) {
+  MED_Q = v;
+  rMedecine();
+  const el = $("med_q");
+  if (el) {
+    el.focus();
+    const n = el.value.length;
+    try {
+      el.setSelectionRange(n, n);
+    } catch (e) {}
+  }
+}
+
 function medMatch(c) {
   const q = MED_Q.trim().toLowerCase();
   if (!q) return true;
@@ -1946,7 +1972,7 @@ function rMedecine() {
   <div class="panel"><div class="ph"><h3>Médecine</h3><span class="muted small">Opération</span></div>
   <div class="pb"><p>Le médecin signifie si le combattant est <b>apte</b> ou <b>inapte</b>, physiquement et biologiquement, avant la suite du circuit.</p></div></div>
   <div class="toolbar">
-    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="med_q" value="${esc(MED_Q)}" oninput="MED_Q=this.value;rMedecine()" placeholder="Nom, n° dossier…"></div>
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="med_q" value="${esc(MED_Q)}" oninput="medSearch(this.value)" placeholder="Nom, n° dossier…"></div>
   </div>
   <div class="cards">
     <div class="kpi c-dem"><div class="n">${pending.length}</div><div class="l">En attente d'avis médical</div></div>
@@ -2373,6 +2399,19 @@ function printRegArmes(){
 /* Distribution de kits + cartes et attestations (audit photo avant impression) */
 var KIT_Q = "";
 
+function kitSearch(v) {
+  KIT_Q = v;
+  rKits();
+  const el = $("kit_q");
+  if (el) {
+    el.focus();
+    const n = el.value.length;
+    try {
+      el.setSelectionRange(n, n);
+    } catch (e) {}
+  }
+}
+
 function kitMatch(c) {
   const q = KIT_Q.trim().toLowerCase();
   if (!q) return true;
@@ -2390,7 +2429,7 @@ function rKits() {
     <p>Remise des kits et délivrance des cartes. <b>Avant toute impression de carte</b>, enregistrez la photo d'audit : le combattant filmé avec l'argent reçu (preuve de perception).</p>
   </div></div>
   <div class="toolbar">
-    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="kit_q" value="${esc(KIT_Q)}" oninput="KIT_Q=this.value;rKits()" placeholder="Nom, n° dossier, n° carte…"></div>
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="kit_q" value="${esc(KIT_Q)}" oninput="kitSearch(this.value)" placeholder="Nom, n° dossier, n° carte…"></div>
   </div>
   <div class="cards">
     <div class="kpi c-rm"><div class="n">${sansAudit.length}</div><div class="l">Cartes sans photo d'audit</div></div>

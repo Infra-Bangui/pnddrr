@@ -2,6 +2,19 @@
 /* Aptitude : parcours combattant et première orientation (Militaire / Socio-économique) */
 var APT_Q = "";
 
+function aptSearch(v) {
+  APT_Q = v;
+  rAptitude();
+  const el = $("apt_q");
+  if (el) {
+    el.focus();
+    const n = el.value.length;
+    try {
+      el.setSelectionRange(n, n);
+    } catch (e) {}
+  }
+}
+
 function aptMatch(c) {
   const q = APT_Q.trim().toLowerCase();
   if (!q) return true;
@@ -26,7 +39,7 @@ function rAptitude() {
     <p>Première décision d'orientation et saisie du parcours dans le groupe armé : fonction, niveau d'instruction, années de service et zone d'opération.</p>
   </div></div>
   <div class="toolbar">
-    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="apt_q" value="${esc(APT_Q)}" oninput="APT_Q=this.value;rAptitude()" placeholder="Nom, n° dossier, vague…"></div>
+    <div class="field" style="flex:1;max-width:480px"><label>Recherche</label><input id="apt_q" value="${esc(APT_Q)}" oninput="aptSearch(this.value)" placeholder="Nom, n° dossier, vague…"></div>
   </div>
   <div class="cards">
     <div class="kpi c-dem"><div class="n">${pending.length}</div><div class="l">En attente de saisie aptitude</div></div>
