@@ -48,27 +48,26 @@ function mAuditRemise(id) {
     `
     <p class="small muted">Photographiez ou importez l'image du combattant <b>avec l'argent reçu</b> avant d'imprimer sa carte.</p>
     <div class="field"><label>Montant perçu (FCFA)</label><input type="number" min="0" id="aud_montant" value="${c.auditRemise && c.auditRemise.montant ? c.auditRemise.montant : ""}"></div>
-    <div class="photo-box" id="audBox" style="margin:12px auto;max-width:280px">${c.auditRemise && c.auditRemise.photo ? `<img src="${c.auditRemise.photo}">` : "Photo<br>d'audit"}</div>
-    <input type="file" id="audFile" accept="image/*" capture="environment" style="font-size:12px;border:none;padding:0">
+    <div id="audCapture" style="margin:0 auto"></div>
     <div class="field" style="margin-top:10px"><label>Observations</label><textarea id="aud_obs" rows="2">${esc((c.auditRemise && c.auditRemise.obs) || "")}</textarea></div>`,
     `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveAuditRemise('${id}')">Enregistrer</button>`
   );
   window._auditPhoto = (c.auditRemise && c.auditRemise.photo) || null;
-  $("audFile").addEventListener("change", (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      window._auditPhoto = r.result;
-      $("audBox").innerHTML = `<img src="${window._auditPhoto}">`;
-    };
-    r.readAsDataURL(f);
-  });
+  if (typeof uiPhotoCapture === "function") {
+    uiPhotoCapture("audCapture", window._auditPhoto, {
+      maxPx: 480,
+      onChange: (data) => {
+        window._auditPhoto = data;
+      },
+    });
+  }
 }
 
 function saveAuditRemise(id) {
   const c = DB.combattants.find((x) => x.id === id);
   if (!c) return;
+  const cap = $("audCapture");
+  if (cap && typeof cap.getPhoto === "function") window._auditPhoto = cap.getPhoto();
   if (!window._auditPhoto) {
     toast("La photo d'audit est obligatoire.");
     return;

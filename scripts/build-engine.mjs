@@ -15,6 +15,7 @@ const FILES = [
   "dashboard/dashboard.js",
   "combattants/nouveau.js",
   "biometrie/lecteur.js",
+  "biometrie/camera.js",
   "combattants/fiche.js",
   "operations/aptitude.js",
   "operations/medecine.js",

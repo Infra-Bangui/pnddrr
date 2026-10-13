@@ -528,7 +528,8 @@ function openModal(title, body, footer){
   $("modalBox").innerHTML = `<div class="mh"><h3>${esc(title)}</h3><button onclick="closeModal()">×</button></div><div class="mb">${body}</div><div class="mf">${footer||'<button class="btn ghost" onclick="closeModal()">Fermer</button>'}</div>`;
   $("modalBack").classList.add("on");
 }
-function closeModal(){ $("modalBack").classList.remove("on"); }
+function closeModal(){
+  if(typeof photoCaptureStopAll==="function") photoCaptureStopAll(); $("modalBack").classList.remove("on"); }
 $("modalBack").addEventListener("click",e=>{ if(e.target.id==="modalBack") closeModal(); });
 
 
@@ -649,7 +650,9 @@ var ENR_EDIT_ID = null;
 var ENR_DRAFT = { photo: null, empreinte: null, identity: null };
 
 function enrSaveDraftStep1() {
-  ENR_DRAFT.photo = window._enrPhotoData != null ? window._enrPhotoData : ENR_DRAFT.photo;
+  const phCap = $("phCapture");
+  if (phCap && typeof phCap.getPhoto === "function") ENR_DRAFT.photo = phCap.getPhoto();
+  else ENR_DRAFT.photo = window._enrPhotoData != null ? window._enrPhotoData : ENR_DRAFT.photo;
   const fpBox = $("fpBox");
   if (fpBox && typeof fpBox.getEmpreinte === "function") ENR_DRAFT.empreinte = fpBox.getEmpreinte();
 }
@@ -704,6 +707,7 @@ function enrShowDesarmStep(c) {
 function enrGoStep(n) {
   if (ENR_STEP === 1 && n > 1) enrSaveDraftStep1();
   if (ENR_STEP === 2 && n > 2) enrSaveDraftStep2();
+  if (ENR_STEP === 1 && n !== 1 && typeof photoCaptureStopAll === "function") photoCaptureStopAll();
   ENR_STEP = n;
   rNouveau(ENR_EDIT_ID || undefined);
 }
@@ -728,11 +732,7 @@ function rNouveau(edit) {
     body = `
     <p class="small muted" style="margin-bottom:14px">Capturez la photo d'identité et l'empreinte digitale sur un écran dédié, avant les informations administratives.</p>
     <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
-      <div style="text-align:center">
-        <div class="photo-box" id="phBox" style="margin:0 auto">${ENR_DRAFT.photo || (c && c.photo) ? `<img src="${ENR_DRAFT.photo || c.photo}">` : "Photo<br>d'identité"}</div>
-        <input type="file" id="phFile" accept="image/*" capture="environment" style="margin-top:10px;font-size:11.5px;border:none;padding:0;max-width:220px">
-        <div class="small muted" style="margin-top:6px;max-width:220px">Compression automatique (≈300 px).</div>
-      </div>
+      <div id="phCapture"></div>
       <div><div id="fpBox" class="fp-box"></div></div>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
@@ -871,36 +871,13 @@ function rNouveau(edit) {
   }
 
   window._enrPhotoData = ENR_DRAFT.photo != null ? ENR_DRAFT.photo : c ? c.photo || null : null;
-  const phFile = $("phFile");
-  if (phFile) {
-    phFile.addEventListener("change", (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const r = new FileReader();
-      r.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            const MAX = 300,
-              k = Math.min(1, MAX / Math.max(img.width, img.height));
-            const cv = document.createElement("canvas");
-            cv.width = Math.max(1, Math.round(img.width * k));
-            cv.height = Math.max(1, Math.round(img.height * k));
-            cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-            const out = cv.toDataURL("image/jpeg", 0.82);
-            window._enrPhotoData = out && out.length > 50 ? out : r.result;
-          } catch (err) {
-            window._enrPhotoData = r.result;
-          }
-          $("phBox").innerHTML = `<img src="${window._enrPhotoData}">`;
-        };
-        img.onerror = () => {
-          window._enrPhotoData = r.result;
-          $("phBox").innerHTML = `<img src="${window._enrPhotoData}">`;
-        };
-        img.src = r.result;
-      };
-      r.readAsDataURL(f);
+  if (step === 1 && typeof uiPhotoCapture === "function") {
+    uiPhotoCapture("phCapture", window._enrPhotoData, {
+      maxPx: 300,
+      onChange: (data) => {
+        window._enrPhotoData = data;
+        ENR_DRAFT.photo = data;
+      },
     });
   }
 
@@ -1102,6 +1079,256 @@ function uiEmpreinte(boxId, initial){
   box.getEmpreinte=()=>box._fp||null;
 }
 chargerLecteurVendor();
+
+/* module: biometrie/camera.js — PNDDRR engine (classic globals) */
+/* Capture photo : choix de la caméra (USB / intégrée) + import fichier */
+const CAM_LS_KEY = "pnddrr_camera_id";
+var _photoStreams = {};
+
+function photoCaptureSupported() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function compressPhotoImage(img, maxPx) {
+  const MAX = maxPx || 300;
+  const k = Math.min(1, MAX / Math.max(img.width, img.height, 1));
+  const cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(img.width * k));
+  cv.height = Math.max(1, Math.round(img.height * k));
+  cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+  const out = cv.toDataURL("image/jpeg", 0.82);
+  return out && out.length > 50 ? out : null;
+}
+
+function compressPhotoDataUrl(src, maxPx, onDone) {
+  const img = new Image();
+  img.onload = () => {
+    try {
+      onDone(compressPhotoImage(img, maxPx) || src);
+    } catch (e) {
+      onDone(src);
+    }
+  };
+  img.onerror = () => onDone(src);
+  img.src = src;
+}
+
+function photoFromFile(file, maxPx, onDone) {
+  if (!file) {
+    if (onDone) onDone(null);
+    return;
+  }
+  const r = new FileReader();
+  r.onload = () => compressPhotoDataUrl(r.result, maxPx, onDone);
+  r.onerror = () => {
+    toast("Impossible de lire le fichier image.");
+    if (onDone) onDone(null);
+  };
+  r.readAsDataURL(file);
+}
+
+function photoCaptureStop(boxId) {
+  const st = _photoStreams[boxId];
+  if (st) {
+    st.getTracks().forEach((t) => t.stop());
+    delete _photoStreams[boxId];
+  }
+  const root = $(boxId);
+  if (root && root._vidEl) {
+    root._vidEl.srcObject = null;
+    root._vidEl.style.display = "none";
+  }
+}
+
+function photoCaptureStopAll() {
+  Object.keys(_photoStreams).forEach(photoCaptureStop);
+}
+
+function savedCameraId() {
+  try {
+    return localStorage.getItem(CAM_LS_KEY) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function saveCameraId(id) {
+  try {
+    if (id) localStorage.setItem(CAM_LS_KEY, id);
+    else localStorage.removeItem(CAM_LS_KEY);
+  } catch (e) {}
+}
+
+async function listVideoCameras() {
+  if (!photoCaptureSupported()) return [];
+  let list = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+  if (list.length && list.every((d) => !d.label)) {
+    try {
+      const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      tmp.getTracks().forEach((t) => t.stop());
+      list = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    } catch (e) {
+      /* permission refusée — liste sans libellés */
+    }
+  }
+  return list;
+}
+
+function cameraLabel(d, i) {
+  if (d.label) return d.label;
+  return "Caméra " + (i + 1);
+}
+
+async function photoCaptureStart(boxId) {
+  const root = $(boxId);
+  if (!root || !root._sel) return;
+  if (!photoCaptureSupported()) {
+    toast("La capture directe n'est pas disponible dans ce navigateur — utilisez « Importer un fichier ».");
+    return;
+  }
+  photoCaptureStop(boxId);
+  const deviceId = root._sel.value;
+  if (deviceId) saveCameraId(deviceId);
+  const video = root._vidEl;
+  const constraints = {
+    audio: false,
+    video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" },
+  };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    _photoStreams[boxId] = stream;
+    video.srcObject = stream;
+    video.style.display = "block";
+    root._previewBox.style.display = "none";
+    await video.play();
+  } catch (e) {
+    toast("Accès à la caméra refusé ou appareil indisponible. Vérifiez les permissions du navigateur.");
+  }
+}
+
+function photoCaptureSnap(boxId) {
+  const root = $(boxId);
+  if (!root || !root._vidEl) return;
+  const video = root._vidEl;
+  const stream = _photoStreams[boxId];
+  if (!stream || !video.videoWidth) {
+    toast("Activez d'abord la caméra, puis capturez.");
+    return;
+  }
+  const maxPx = root._maxPx || 300;
+  const cv = document.createElement("canvas");
+  cv.width = video.videoWidth;
+  cv.height = video.videoHeight;
+  cv.getContext("2d").drawImage(video, 0, 0);
+  const raw = cv.toDataURL("image/jpeg", 0.88);
+  photoCaptureStop(boxId);
+  compressPhotoDataUrl(raw, maxPx, (out) => {
+    root.setPhoto(out);
+    toast("Photo capturée.");
+  });
+}
+
+function uiPhotoCapture(boxId, initialPhoto, opts) {
+  const root = $(boxId);
+  if (!root) return;
+  opts = opts || {};
+  const maxPx = opts.maxPx || 300;
+  const onChange = opts.onChange || null;
+
+  photoCaptureStop(boxId);
+
+  root.className = "photo-capture-wrap";
+  root._maxPx = maxPx;
+  root._photo = initialPhoto || null;
+
+  root.innerHTML = `
+    <div class="photo-box photo-capture-preview" data-role="preview">${root._photo ? `<img src="${root._photo}">` : "Photo"}</div>
+    <video class="photo-capture-video" playsinline muted autoplay style="display:none"></video>
+    ${
+      photoCaptureSupported()
+        ? `<div class="field photo-capture-dev" style="margin-top:10px;text-align:left">
+      <label>Appareil photo</label>
+      <select class="photo-capture-select" style="font-size:13px"><option value="">— Chargement… —</option></select>
+      <div class="small muted" style="margin-top:4px;font-weight:400;text-transform:none">Branchez la webcam USB, choisissez-la dans la liste, puis « Activer la caméra ».</div>
+    </div>
+    <div class="photo-capture-actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px">
+      <button type="button" class="btn sm sec photo-cap-start">Activer la caméra</button>
+      <button type="button" class="btn sm photo-cap-snap">Capturer</button>
+      <button type="button" class="btn sm ghost photo-cap-retake" style="display:${root._photo ? "inline-block" : "none"}">Reprendre</button>
+    </div>`
+        : `<p class="small muted" style="margin-top:8px">Capture directe indisponible — importez une photo.</p>`
+    }
+    <label class="btn sm ghost" style="margin-top:8px;display:inline-block;cursor:pointer">Importer un fichier
+      <input type="file" accept="image/*" class="photo-cap-file" style="display:none"></label>
+    <div class="small muted" style="margin-top:6px">Compression automatique (≈${maxPx} px).</div>`;
+
+  root._previewBox = root.querySelector('[data-role="preview"]');
+  root._vidEl = root.querySelector(".photo-capture-video");
+  root._sel = root.querySelector(".photo-capture-select");
+
+  root.setPhoto = function (dataUrl) {
+    root._photo = dataUrl || null;
+    if (dataUrl) {
+      root._previewBox.innerHTML = `<img src="${dataUrl}">`;
+      root._previewBox.style.display = "flex";
+      const rt = root.querySelector(".photo-cap-retake");
+      if (rt) rt.style.display = "inline-block";
+    } else {
+      root._previewBox.innerHTML = "Photo";
+      root._previewBox.style.display = "flex";
+      const rt = root.querySelector(".photo-cap-retake");
+      if (rt) rt.style.display = "none";
+    }
+    if (onChange) onChange(root._photo);
+  };
+
+  root.getPhoto = () => root._photo || null;
+
+  const fileIn = root.querySelector(".photo-cap-file");
+  if (fileIn) {
+    fileIn.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      photoFromFile(f, maxPx, (out) => {
+        if (out) root.setPhoto(out);
+        e.target.value = "";
+      });
+    });
+  }
+
+  const btnStart = root.querySelector(".photo-cap-start");
+  if (btnStart) btnStart.addEventListener("click", (e) => { e.preventDefault(); photoCaptureStart(boxId); });
+  const btnSnap = root.querySelector(".photo-cap-snap");
+  if (btnSnap) btnSnap.addEventListener("click", (e) => { e.preventDefault(); photoCaptureSnap(boxId); });
+  const btnRetake = root.querySelector(".photo-cap-retake");
+  if (btnRetake) {
+    btnRetake.addEventListener("click", (e) => {
+      e.preventDefault();
+      root.setPhoto(null);
+      photoCaptureStart(boxId);
+    });
+  }
+
+  if (root._sel) {
+    listVideoCameras().then((cams) => {
+      if (!root._sel) return;
+      const saved = savedCameraId();
+      if (!cams.length) {
+        root._sel.innerHTML = `<option value="">Aucune caméra détectée</option>`;
+        return;
+      }
+      root._sel.innerHTML = cams
+        .map((d, i) => {
+          const sel = saved && d.deviceId === saved ? " selected" : !saved && i === 0 ? " selected" : "";
+          return `<option value="${esc(d.deviceId)}"${sel}>${esc(cameraLabel(d, i))}</option>`;
+        })
+        .join("");
+      root._sel.addEventListener("change", () => {
+        saveCameraId(root._sel.value);
+        if (_photoStreams[boxId]) photoCaptureStart(boxId);
+      });
+    });
+  }
+}
 
 /* module: combattants/fiche.js — PNDDRR engine (classic globals) */
 /* ================= FICHE INDIVIDUELLE ================= */
@@ -2192,27 +2419,26 @@ function mAuditRemise(id) {
     `
     <p class="small muted">Photographiez ou importez l'image du combattant <b>avec l'argent reçu</b> avant d'imprimer sa carte.</p>
     <div class="field"><label>Montant perçu (FCFA)</label><input type="number" min="0" id="aud_montant" value="${c.auditRemise && c.auditRemise.montant ? c.auditRemise.montant : ""}"></div>
-    <div class="photo-box" id="audBox" style="margin:12px auto;max-width:280px">${c.auditRemise && c.auditRemise.photo ? `<img src="${c.auditRemise.photo}">` : "Photo<br>d'audit"}</div>
-    <input type="file" id="audFile" accept="image/*" capture="environment" style="font-size:12px;border:none;padding:0">
+    <div id="audCapture" style="margin:0 auto"></div>
     <div class="field" style="margin-top:10px"><label>Observations</label><textarea id="aud_obs" rows="2">${esc((c.auditRemise && c.auditRemise.obs) || "")}</textarea></div>`,
     `<button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn" onclick="saveAuditRemise('${id}')">Enregistrer</button>`
   );
   window._auditPhoto = (c.auditRemise && c.auditRemise.photo) || null;
-  $("audFile").addEventListener("change", (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      window._auditPhoto = r.result;
-      $("audBox").innerHTML = `<img src="${window._auditPhoto}">`;
-    };
-    r.readAsDataURL(f);
-  });
+  if (typeof uiPhotoCapture === "function") {
+    uiPhotoCapture("audCapture", window._auditPhoto, {
+      maxPx: 480,
+      onChange: (data) => {
+        window._auditPhoto = data;
+      },
+    });
+  }
 }
 
 function saveAuditRemise(id) {
   const c = DB.combattants.find((x) => x.id === id);
   if (!c) return;
+  const cap = $("audCapture");
+  if (cap && typeof cap.getPhoto === "function") window._auditPhoto = cap.getPhoto();
   if (!window._auditPhoto) {
     toast("La photo d'audit est obligatoire.");
     return;

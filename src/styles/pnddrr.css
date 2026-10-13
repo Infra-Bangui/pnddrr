@@ -135,6 +135,10 @@ header.top .date{font-size:12.5px;color:var(--muted)}
 .kpi.click:hover{box-shadow:0 6px 18px rgba(14,124,123,.22);transform:translateY(-2px)}
 .photo-box{width:110px;height:130px;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#F7FAF9;color:var(--muted);font-size:11px;text-align:center}
 .photo-box img{width:100%;height:100%;object-fit:cover}
+.photo-capture-wrap{max-width:320px;text-align:center}
+.photo-capture-wrap .photo-capture-preview{margin:0 auto}
+.photo-capture-video{width:100%;max-width:280px;border-radius:8px;border:1px solid var(--line);background:#000;margin:8px auto 0;display:block}
+.photo-capture-dev select{text-transform:none;letter-spacing:0}
 .fp-box{width:110px;text-align:center}
 .fp-box .fp-empty,.fp-box .fp-ok{width:110px;min-height:72px;border:1.5px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;background:#F7FAF9;color:var(--muted);font-size:11px;padding:6px}
 .fp-box .fp-ok{border-style:solid;border-color:var(--teal);color:var(--teal-dark);font-weight:600}

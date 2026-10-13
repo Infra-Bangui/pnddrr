@@ -5,7 +5,9 @@ var ENR_EDIT_ID = null;
 var ENR_DRAFT = { photo: null, empreinte: null, identity: null };
 
 function enrSaveDraftStep1() {
-  ENR_DRAFT.photo = window._enrPhotoData != null ? window._enrPhotoData : ENR_DRAFT.photo;
+  const phCap = $("phCapture");
+  if (phCap && typeof phCap.getPhoto === "function") ENR_DRAFT.photo = phCap.getPhoto();
+  else ENR_DRAFT.photo = window._enrPhotoData != null ? window._enrPhotoData : ENR_DRAFT.photo;
   const fpBox = $("fpBox");
   if (fpBox && typeof fpBox.getEmpreinte === "function") ENR_DRAFT.empreinte = fpBox.getEmpreinte();
 }
@@ -60,6 +62,7 @@ function enrShowDesarmStep(c) {
 function enrGoStep(n) {
   if (ENR_STEP === 1 && n > 1) enrSaveDraftStep1();
   if (ENR_STEP === 2 && n > 2) enrSaveDraftStep2();
+  if (ENR_STEP === 1 && n !== 1 && typeof photoCaptureStopAll === "function") photoCaptureStopAll();
   ENR_STEP = n;
   rNouveau(ENR_EDIT_ID || undefined);
 }
@@ -84,11 +87,7 @@ function rNouveau(edit) {
     body = `
     <p class="small muted" style="margin-bottom:14px">Capturez la photo d'identité et l'empreinte digitale sur un écran dédié, avant les informations administratives.</p>
     <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
-      <div style="text-align:center">
-        <div class="photo-box" id="phBox" style="margin:0 auto">${ENR_DRAFT.photo || (c && c.photo) ? `<img src="${ENR_DRAFT.photo || c.photo}">` : "Photo<br>d'identité"}</div>
-        <input type="file" id="phFile" accept="image/*" capture="environment" style="margin-top:10px;font-size:11.5px;border:none;padding:0;max-width:220px">
-        <div class="small muted" style="margin-top:6px;max-width:220px">Compression automatique (≈300 px).</div>
-      </div>
+      <div id="phCapture"></div>
       <div><div id="fpBox" class="fp-box"></div></div>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
@@ -227,36 +226,13 @@ function rNouveau(edit) {
   }
 
   window._enrPhotoData = ENR_DRAFT.photo != null ? ENR_DRAFT.photo : c ? c.photo || null : null;
-  const phFile = $("phFile");
-  if (phFile) {
-    phFile.addEventListener("change", (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const r = new FileReader();
-      r.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            const MAX = 300,
-              k = Math.min(1, MAX / Math.max(img.width, img.height));
-            const cv = document.createElement("canvas");
-            cv.width = Math.max(1, Math.round(img.width * k));
-            cv.height = Math.max(1, Math.round(img.height * k));
-            cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-            const out = cv.toDataURL("image/jpeg", 0.82);
-            window._enrPhotoData = out && out.length > 50 ? out : r.result;
-          } catch (err) {
-            window._enrPhotoData = r.result;
-          }
-          $("phBox").innerHTML = `<img src="${window._enrPhotoData}">`;
-        };
-        img.onerror = () => {
-          window._enrPhotoData = r.result;
-          $("phBox").innerHTML = `<img src="${window._enrPhotoData}">`;
-        };
-        img.src = r.result;
-      };
-      r.readAsDataURL(f);
+  if (step === 1 && typeof uiPhotoCapture === "function") {
+    uiPhotoCapture("phCapture", window._enrPhotoData, {
+      maxPx: 300,
+      onChange: (data) => {
+        window._enrPhotoData = data;
+        ENR_DRAFT.photo = data;
+      },
     });
   }
 
